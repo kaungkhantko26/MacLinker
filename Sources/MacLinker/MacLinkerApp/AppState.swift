@@ -18,6 +18,7 @@ final class AppState: ObservableObject {
     let files = FileTransferManager()
     let server = NetworkServer()
     let updater = Updater()
+    let system = RemoteSystemManager()
     let discovery: DeviceDiscoveryManager
     let connections: ConnectionManager
     let reconnect: ReconnectManager
@@ -51,7 +52,7 @@ final class AppState: ObservableObject {
             permissions.objectWillChange.eraseToAnyPublisher(), paths.objectWillChange.eraseToAnyPublisher(),
             pairing.objectWillChange.eraseToAnyPublisher(), input.objectWillChange.eraseToAnyPublisher(),
             files.objectWillChange.eraseToAnyPublisher(), discovery.objectWillChange.eraseToAnyPublisher(),
-            connections.objectWillChange.eraseToAnyPublisher(), updater.objectWillChange.eraseToAnyPublisher(),
+            connections.objectWillChange.eraseToAnyPublisher(), updater.objectWillChange.eraseToAnyPublisher(), system.objectWillChange.eraseToAnyPublisher(),
         ].map { $0.map { _ in () }.eraseToAnyPublisher() }
         changes.forEach { $0.receive(on: DispatchQueue.main).sink { [weak self] in
             self?.objectWillChange.send()
@@ -70,6 +71,7 @@ final class AppState: ObservableObject {
         connections.onDisconnected = { [weak self] id in
             self?.input.peerDisconnected(id)
             self?.files.peerDisconnected()
+            self?.system.peerDisconnected(id)
         }
         pairing.onPresent = { WindowManager.shared.showPairing() }
 
@@ -77,6 +79,9 @@ final class AppState: ObservableObject {
 
         clipboard.isEnabled = { [weak self] in self?.settings.clipboardSharing ?? false }
         clipboard.broadcast = { [weak self] payload in self?.connections.broadcast(.clipboard, payload: payload) }
+
+        system.isAllowed = { [weak self] in self?.settings.remoteSystemControl ?? false }
+        system.send = { [weak self] id, type, payload in self?.connections.send(type, payload: payload, to: id) }
 
         files.isEnabled = { [weak self] in self?.settings.fileSharing ?? false }
         files.peerName = { [weak self] id in self?.trusted.device(id)?.name ?? id }
@@ -127,6 +132,8 @@ final class AppState: ObservableObject {
             clipboard.receive(msg.payload)
         case .fileOffer, .fileChunk, .fileEnd, .fileAbort:
             files.handle(message: msg, from: id)
+        case .systemControl, .systemState, .systemQuery:
+            system.handle(msg, from: id)
         case .layout:
             if let p = try? LayoutPayload.decode(msg.payload) { applyRemoteLayout(p, from: id) }
         default: break
@@ -135,6 +142,8 @@ final class AppState: ObservableObject {
 
     private func peerConnected(_ id: String) {
         reconnect.reset(id)
+        system.announce(to: id)
+        system.refresh(id)
         if let pos = trusted.device(id)?.position {
             send(layout: pos, userInitiated: false, to: id)
         }

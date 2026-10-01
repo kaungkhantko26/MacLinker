@@ -23,6 +23,10 @@ enum MessageType: UInt8 {
     case fileEnd = 42
     case fileAbort = 43
 
+    case systemControl = 50
+    case systemState = 51
+    case systemQuery = 52
+
     /// Messages that may flow before the peer is paired/trusted.
     var isHandshakePhase: Bool {
         switch self {
@@ -174,4 +178,41 @@ struct FileOfferPayload: Codable {
     var id: UUID
     var name: String
     var size: UInt64
+}
+
+/// Ask the receiving Mac to change one of its own settings.
+struct SystemControlPayload: BinaryPayload {
+    enum Kind: UInt8 { case brightness = 1, volume = 2, mute = 3 }
+    var kind: Kind
+    /// 0...1 for brightness and volume; 0 or 1 for mute.
+    var value: Float
+
+    func encode() -> Data { var w = ByteWriter(); w.u8(kind.rawValue); w.f32(value); return w.data }
+    static func decode(_ data: Data) throws -> Self {
+        var r = ByteReader(data)
+        guard let kind = Kind(rawValue: try r.u8()) else { throw MessageError.malformed }
+        let v = try r.f32()
+        guard v.isFinite else { throw MessageError.malformed }
+        return Self(kind: kind, value: min(max(v, 0), 1))
+    }
+}
+
+/// What a Mac can do and its current values. Negative values mean "unknown".
+struct SystemStatePayload: BinaryPayload, Equatable {
+    var hasBrightness: Bool
+    var hasVolume: Bool
+    var brightness: Float
+    var volume: Float
+    var muted: Bool
+
+    func encode() -> Data {
+        var w = ByteWriter()
+        w.bool(hasBrightness); w.bool(hasVolume); w.f32(brightness); w.f32(volume); w.bool(muted)
+        return w.data
+    }
+    static func decode(_ data: Data) throws -> Self {
+        var r = ByteReader(data)
+        return Self(hasBrightness: try r.bool(), hasVolume: try r.bool(), brightness: try r.f32(),
+                    volume: try r.f32(), muted: try r.bool())
+    }
 }

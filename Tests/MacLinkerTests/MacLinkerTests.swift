@@ -239,3 +239,28 @@ final class StorageAndModelTests: XCTestCase {
         XCTAssertFalse(ClipboardMessage.allowed.contains(.init("public.file-url")))
     }
 }
+
+final class SystemControlTests: XCTestCase {
+    func testControlPayloadClampsAndRejectsGarbage() throws {
+        let hi = try SystemControlPayload.decode(SystemControlPayload(kind: .volume, value: 7).encode())
+        XCTAssertEqual(hi.value, 1)
+        XCTAssertThrowsError(try SystemControlPayload.decode(Data([9, 0, 0, 0, 0])))   // unknown kind
+        XCTAssertThrowsError(try SystemControlPayload.decode(SystemControlPayload(kind: .brightness, value: .nan).encode()))
+    }
+
+    func testStatePayloadRoundTrip() throws {
+        let s = SystemStatePayload(hasBrightness: true, hasVolume: false, brightness: 0.4, volume: -1, muted: true)
+        XCTAssertEqual(try SystemStatePayload.decode(s.encode()), s)
+    }
+
+    func testDDCPacketChecksum() {
+        // Set brightness (VCP 0x10) to 50: checksum = 0x6E ^ 0x51 ^ all preceding bytes.
+        XCTAssertEqual(SystemController.ddcPacket(code: 0x10, value: 50), [0x84, 0x03, 0x10, 0x00, 0x32, 0x9A])
+        XCTAssertEqual(SystemController.ddcPacket(code: 0x10, value: 0x0100).prefix(5), [0x84, 0x03, 0x10, 0x01, 0x00])
+    }
+
+    func testReadingStateNeverCrashes() {
+        let s = SystemController().state()   // read-only: reports what this Mac supports
+        XCTAssertTrue(s.volume == -1 || (0...1).contains(s.volume))
+    }
+}

@@ -27,6 +27,7 @@ MacLinker replaces that stack with something simple and observable: plain TCP ov
 - Share keyboard and mouse: push the pointer against a screen edge to cross to the other Mac
 - Clipboard sync (text, links, images)
 - File transfer, with drag and drop
+- Adjust the other Mac's display brightness and volume from sliders (built-in displays and DDC-capable external monitors on Apple Silicon; sliders only appear for what that Mac supports)
 - Automatic discovery (Bonjour) and automatic reconnect; add a Mac by IP or `name.local` if discovery is blocked
 - Prefers a direct USB-C/Thunderbolt cable or Ethernet over Wi-Fi for the lowest latency
 - Works alongside VPNs: Mac-to-Mac traffic is pinned to the physical network interface so it never enters a tunnel (for example Outline)

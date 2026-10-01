@@ -9,6 +9,7 @@ struct SettingsView: View {
                 Toggle("Control keyboard & mouse across Macs", isOn: $app.settings.inputSharing)
                 Toggle("Share clipboard (text, links, images)", isOn: $app.settings.clipboardSharing)
                 Toggle("Accept files into Downloads/MacLinker", isOn: $app.settings.fileSharing)
+                Toggle("Let paired Macs adjust this Mac's brightness and volume", isOn: $app.settings.remoteSystemControl)
                 Toggle("Open at login", isOn: $app.settings.launchAtLogin)
                 HStack {
                     Text("Edge push")

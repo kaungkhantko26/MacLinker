@@ -7,6 +7,8 @@ final class Settings: ObservableObject {
     @Published var inputSharing: Bool { didSet { defaults.set(inputSharing, forKey: "inputSharing") } }
     @Published var clipboardSharing: Bool { didSet { defaults.set(clipboardSharing, forKey: "clipboardSharing") } }
     @Published var fileSharing: Bool { didSet { defaults.set(fileSharing, forKey: "fileSharing") } }
+    /// Let paired Macs change this Mac's brightness and volume.
+    @Published var remoteSystemControl: Bool { didSet { defaults.set(remoteSystemControl, forKey: "remoteSystemControl") } }
     /// Bind LAN connections to the physical interface so a VPN (Outline) can't swallow them.
     @Published var pinToLAN: Bool { didSet { defaults.set(pinToLAN, forKey: "pinToLAN") } }
     @Published var edgePush: Double { didSet { defaults.set(edgePush, forKey: "edgePush") } }
@@ -24,6 +26,7 @@ final class Settings: ObservableObject {
         inputSharing = bool("inputSharing", true)
         clipboardSharing = bool("clipboardSharing", true)
         fileSharing = bool("fileSharing", true)
+        remoteSystemControl = bool("remoteSystemControl", true)
         pinToLAN = bool("pinToLAN", true)
         launchAtLogin = bool("launchAtLogin", false)
         let push = UserDefaults.standard.double(forKey: "edgePush")

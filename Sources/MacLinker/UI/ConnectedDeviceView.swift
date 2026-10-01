@@ -38,6 +38,7 @@ struct ConnectedDeviceView: View {
                             return true
                         }
                 }
+                RemoteControlsView(device: device)
                 if device.position == nil {
                     Text("Pick a side to share one keyboard and mouse between the Macs.")
                         .font(.caption).foregroundStyle(.orange)
@@ -72,6 +73,42 @@ struct PositionPicker: View {
                 cell(.right)
             }
             cell(.bottom)
+        }
+    }
+}
+
+/// Brightness and volume of the *other* Mac. Only the controls that Mac reports as working are shown.
+struct RemoteControlsView: View {
+    @EnvironmentObject var app: AppState
+    let device: Device
+
+    private func binding(_ kind: SystemControlPayload.Kind) -> Binding<Double> {
+        Binding(get: {
+            guard let s = app.system.states[device.id] else { return 0.5 }
+            let v = kind == .brightness ? s.brightness : s.volume
+            return Double(v < 0 ? 0.5 : v)
+        }, set: { app.system.set(kind, Float($0), on: device.id) })
+    }
+
+    var body: some View {
+        if let s = app.system.states[device.id], s.hasBrightness || s.hasVolume {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("\(device.name) controls").font(.caption).foregroundStyle(.secondary)
+                if s.hasBrightness {
+                    HStack {
+                        Image(systemName: "sun.max").frame(width: 20)
+                        Slider(value: binding(.brightness), in: 0...1)
+                    }
+                }
+                if s.hasVolume {
+                    HStack {
+                        Button { app.system.set(.mute, s.muted ? 0 : 1, on: device.id) } label: {
+                            Image(systemName: s.muted ? "speaker.slash" : "speaker.wave.2").frame(width: 20)
+                        }.buttonStyle(.plain)
+                        Slider(value: binding(.volume), in: 0...1).disabled(s.muted)
+                    }
+                }
+            }
         }
     }
 }
