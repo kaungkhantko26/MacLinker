@@ -1,4 +1,6 @@
-# MacLinker 🔗
+<p align="center"><img src="Resources/AppIconSource.webp" width="128" alt="MacLinker icon"></p>
+
+# MacLinker
 
 [![CI](https://github.com/kaungkhantko26/MacLinker/actions/workflows/ci.yml/badge.svg)](https://github.com/kaungkhantko26/MacLinker/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/kaungkhantko26/MacLinker)](https://github.com/kaungkhantko26/MacLinker/releases/latest)
