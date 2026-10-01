@@ -102,6 +102,7 @@ final class AppState: ObservableObject {
     }
 
     func start() {
+        CursorHider.prepare()
         paths.start()
         permissions.start()
         server.start(identity: identity)

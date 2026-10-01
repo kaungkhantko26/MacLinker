@@ -2,17 +2,6 @@ import Foundation
 import AppKit
 import CoreGraphics
 
-// Private WindowServer calls (the same ones Synergy/Barrier use) that allow hiding the cursor
-// while this app is not frontmost. Without them the cursor stays frozen on screen.
-@_silgen_name("CGSDefaultConnectionForThread") private func CGSDefaultConnectionForThread() -> Int32
-@_silgen_name("CGSSetConnectionProperty")
-private func CGSSetConnectionProperty(_ cid: Int32, _ target: Int32, _ key: CFString, _ value: CFTypeRef) -> Int32
-
-private let allowBackgroundCursor: Void = {
-    let cid = CGSDefaultConnectionForThread()
-    _ = CGSSetConnectionProperty(cid, cid, "SetsCursorInBackground" as CFString, kCFBooleanTrue)
-}()
-
 /// Owns "who is driving": this Mac's own devices, or a peer's.
 ///
 /// - `.controlling`: our pointer crossed a screen edge. Local events are swallowed and streamed to the peer.
@@ -69,7 +58,6 @@ final class InputManager: ObservableObject {
         guard hidden != cursorHidden else { return }
         cursorHidden = hidden
         DispatchQueue.main.async {
-            _ = allowBackgroundCursor  // best effort; CursorHider does the reliable part
             if hidden { CursorHider.hide() } else { CursorHider.show() }
         }
     }

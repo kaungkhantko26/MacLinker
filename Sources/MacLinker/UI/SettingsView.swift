@@ -12,6 +12,11 @@ struct SettingsView: View {
                 Toggle("Let paired Macs adjust this Mac's brightness and volume", isOn: $app.settings.remoteSystemControl)
                 Toggle("Open at login", isOn: $app.settings.launchAtLogin)
                 HStack {
+                    Text("Pointer hiding while controlling another Mac")
+                    Spacer()
+                    Button("Test (5 s)") { CursorHider.test() }
+                }
+                HStack {
                     Text("Edge push")
                     Slider(value: $app.settings.edgePush, in: 0...60)
                     Text("\(Int(app.settings.edgePush)) pt").monospacedDigit().frame(width: 50)
