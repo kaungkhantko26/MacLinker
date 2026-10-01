@@ -11,7 +11,7 @@ extension View {
 
 struct PageHeader<Trailing: View>: View {
     let title: String
-    var subtitle: String? = nil
+    var subtitle: String?
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
