@@ -12,6 +12,7 @@ disabled_rules:
   - nesting
   - trailing_comma
   - statement_position
+  - large_tuple
   - type_name
   - unneeded_synthesized_initializer
 opt_in_rules:
