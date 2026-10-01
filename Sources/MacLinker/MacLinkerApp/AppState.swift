@@ -55,7 +55,7 @@ final class AppState: ObservableObject {
         ].map { $0.map { _ in () }.eraseToAnyPublisher() }
         changes.forEach { $0.receive(on: DispatchQueue.main).sink { [weak self] in
             self?.objectWillChange.send()
-            self?.refreshEdgePeers()
+            self?.syncInput()
         }.store(in: &bag) }
 
         server.onConnection = { [weak self] in self?.connections.accept($0) }
@@ -74,8 +74,6 @@ final class AppState: ObservableObject {
         pairing.onPresent = { WindowManager.shared.showPairing() }
 
         input.send = { [weak self] id, type, payload in self?.connections.send(type, payload: payload, to: id) }
-        input.isEnabled = { [weak self] in self?.settings.inputSharing ?? false }
-        input.edgePush = { [weak self] in self?.settings.edgePush ?? K.defaultEdgePush }
 
         clipboard.isEnabled = { [weak self] in self?.settings.clipboardSharing ?? false }
         clipboard.broadcast = { [weak self] payload in self?.connections.broadcast(.clipboard, payload: payload) }
@@ -87,7 +85,7 @@ final class AppState: ObservableObject {
         }
 
         settings.$inputSharing.dropFirst().sink { [weak self] _ in
-            DispatchQueue.main.async { self?.input.abortIfNeeded() }
+            DispatchQueue.main.async { self?.syncInput(); self?.input.abortIfNeeded() }
         }.store(in: &bag)
         permissions.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in
             DispatchQueue.main.async { self?.startInputIfPossible() }
@@ -110,12 +108,13 @@ final class AppState: ObservableObject {
         if !input.isTapRunning { input.startMonitoring() }
     }
 
-    private func refreshEdgePeers() {
+    /// Pushes the current settings and layout to the input thread (which owns them while running).
+    private func syncInput() {
         var map: [Edge: String] = [:]
         for t in trusted.devices {
             if let edge = t.position, connections.isConnected(t.id) { map[edge] = t.id }
         }
-        input.edgePeers = map
+        input.configure(enabled: settings.inputSharing, push: settings.edgePush, edgePeers: map)
     }
 
     // MARK: Routing
@@ -139,7 +138,7 @@ final class AppState: ObservableObject {
         if let pos = trusted.device(id)?.position {
             send(layout: pos, userInitiated: false, to: id)
         }
-        refreshEdgePeers()
+        syncInput()
     }
 
     // MARK: Layout
@@ -147,7 +146,7 @@ final class AppState: ObservableObject {
     func setPosition(_ edge: Edge?, for id: String) {
         trusted.update(id) { $0.position = edge }
         send(layout: edge, userInitiated: true, to: id)
-        refreshEdgePeers()
+        syncInput()
     }
 
     private func send(layout: Edge?, userInitiated: Bool, to id: String) {
@@ -164,7 +163,7 @@ final class AppState: ObservableObject {
             guard senderWins || mine == nil else { return }
         }
         trusted.update(id) { $0.position = p.peerPosition?.opposite }
-        refreshEdgePeers()
+        syncInput()
     }
 
     // MARK: Actions
@@ -195,7 +194,7 @@ final class AppState: ObservableObject {
     func forget(_ id: String) {
         connections.disconnect(id)
         trusted.remove(id)
-        refreshEdgePeers()
+        syncInput()
     }
 
     func sendFiles(_ urls: [URL], to id: String) {

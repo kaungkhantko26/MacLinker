@@ -30,6 +30,12 @@ final class FileTransferManager: ObservableObject {
     }
     private var incoming: [UUID: Incoming] = [:]
     private var cancelled = Set<UUID>()
+    private let cancelLock = NSLock()
+    private func markCancelled(_ id: UUID) { cancelLock.lock(); cancelled.insert(id); cancelLock.unlock() }
+    private func takeCancelled(_ id: UUID) -> Bool {
+        cancelLock.lock(); defer { cancelLock.unlock() }
+        return cancelled.remove(id) != nil
+    }
     private let io = DispatchQueue(label: "maclinker.files")
 
     private func update(_ id: UUID, _ change: @escaping (inout TransferItem) -> Void) {
@@ -66,7 +72,7 @@ final class FileTransferManager: ObservableObject {
             update(id) { $0.status = error.map { .failed($0) } ?? .done }
         }
         func next() {
-            if cancelled.contains(id) { cancelled.remove(id); finish("Cancelled by receiver"); return }
+            if takeCancelled(id) { finish("Cancelled by receiver"); return }
             let chunk = (try? handle.read(upToCount: K.fileChunkSize)) ?? Data()
             if chunk.isEmpty {
                 var w = ByteWriter()
@@ -133,7 +139,7 @@ final class FileTransferManager: ObservableObject {
             case .fileAbort:
                 var r = ByteReader(message.payload)
                 let id = try r.uuid()
-                cancelled.insert(id)
+                markCancelled(id)
                 if incoming[id] != nil { abort(id, "Cancelled by sender") }
             default: break
             }

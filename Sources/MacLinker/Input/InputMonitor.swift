@@ -18,6 +18,9 @@ final class InputMonitor {
         init(_ m: InputMonitor, active: Bool) { monitor = m; isActive = active }
     }
 
+    private let runLoop: CFRunLoop
+    init(runLoop: CFRunLoop) { self.runLoop = runLoop }
+
     private var passiveTap: CFMachPort?
     private var activeTap: CFMachPort?
     private var sources: [CFRunLoopSource] = []
@@ -49,7 +52,7 @@ final class InputMonitor {
         }
         for tap in [passive, active] {
             let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)!
-            CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+            CFRunLoopAddSource(runLoop, source, .commonModes)
             sources.append(source)
         }
         CGEvent.tapEnable(tap: passive, enable: true)

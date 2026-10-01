@@ -1,15 +1,14 @@
 #!/bin/bash
 # Usage: scripts/release.sh 1.0.1
-# Builds, signs and publishes build/MacLinker.zip as a GitHub release. MacLinker on your Macs then
-# finds it automatically. Needs the repo in .maclinker-repo (owner/repo) and the `gh` CLI, or upload by hand.
+# Builds, signs and publishes a GitHub release with MacLinker.zip (used by the in-app updater)
+# and MacLinker.dmg (for humans), and refreshes the Homebrew cask. Needs the `gh` CLI, logged in.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 V="${1:?usage: release.sh <version>}"
-MACLINKER_VERSION="$V" ./scripts/bundle.sh
 REPO="$(cat .maclinker-repo)"
-if command -v gh >/dev/null; then
-  gh release create "v$V" build/MacLinker.zip --repo "$REPO" --title "MacLinker $V" --notes "MacLinker $V"
-else
-  echo "gh not installed. Create a release tagged v$V at https://github.com/$REPO/releases/new"
-  echo "and attach build/MacLinker.zip (it must be named MacLinker.zip)."
-fi
+MACLINKER_VERSION="$V" ./scripts/bundle.sh
+./scripts/make_dmg.sh
+SHA="$(shasum -a 256 build/MacLinker.zip | awk '{print $1}')"
+sed -i '' -e "s/^  version \".*\"/  version \"$V\"/" -e "s/^  sha256 \".*\"/  sha256 \"$SHA\"/" Casks/maclinker.rb
+gh release create "v$V" build/MacLinker.zip build/MacLinker.dmg --repo "$REPO" --title "MacLinker $V" --generate-notes
+echo "Released v$V. Commit and push Casks/maclinker.rb so 'brew install' picks up the new version."

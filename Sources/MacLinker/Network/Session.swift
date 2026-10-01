@@ -255,7 +255,11 @@ final class Session {
     func send(_ type: MessageType, payload: Data = Data(), completion: ((Error?) -> Void)? = nil) {
         queue.async {
             do { try self.sendOnQueue(type, payload: payload, completion: completion) }
-            catch { completion?(error); self.closeOnQueue(error) }
+            catch {
+                completion?(error)
+                if case SessionError.notConnected = error { return }
+                self.closeOnQueue(error)
+            }
         }
     }
 

@@ -4,13 +4,15 @@ import CoreGraphics
 enum ScreenGeometry {
     private static var cached: CGRect?
     private static var registered = false
+    fileprivate static let lock = NSLock()
 
     /// Union of all active displays in global (top-left origin) coordinates.
     /// Cached: this is read on every mouse event, and enumerating displays each time is slow.
     static var bounds: CGRect {
+        lock.lock(); defer { lock.unlock() }
         if !registered {
             registered = true
-            CGDisplayRegisterReconfigurationCallback({ _, _, _ in ScreenGeometry.cached = nil }, nil)
+            CGDisplayRegisterReconfigurationCallback({ _, _, _ in ScreenGeometry.lock.lock(); ScreenGeometry.cached = nil; ScreenGeometry.lock.unlock() }, nil)
         }
         if let cached { return cached }
         var count: UInt32 = 0

@@ -1,5 +1,10 @@
 # MacLinker 🔗
 
+[![CI](https://github.com/kaungkhantko26/MacLinker/actions/workflows/ci.yml/badge.svg)](https://github.com/kaungkhantko26/MacLinker/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/kaungkhantko26/MacLinker)](https://github.com/kaungkhantko26/MacLinker/releases/latest)
+![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue)
+![License MIT](https://img.shields.io/badge/license-MIT-green)
+
 One keyboard and mouse, a shared clipboard and file transfer between your Macs, **without relying on Apple's Continuity / Universal Control**.
 
 Works on Apple Silicon and Intel Macs running macOS 13 or later.
@@ -30,16 +35,27 @@ MacLinker replaces that stack with something simple and observable: plain TCP ov
 
 ## Install
 
-1. Download `MacLinker.zip` from the [latest release](https://github.com/kaungkhantko26/MacLinker/releases/latest) on **each** Mac and unzip it.
-2. Move `MacLinker.app` to Applications. Because the app isn't notarized by Apple, the first time **right-click > Open**, or run:
+**Homebrew**
+```
+brew tap kaungkhantko26/maclinker https://github.com/kaungkhantko26/MacLinker
+brew install --cask maclinker
+```
+
+**Or download:** get `MacLinker.dmg` (drag to Applications) or `MacLinker.zip` from the [latest release](https://github.com/kaungkhantko26/MacLinker/releases/latest) on **each** Mac.
+
+Then, on each Mac:
+
+1. Move `MacLinker.app` to **Applications** and open it from there. Because the app isn't notarized by Apple, the first launch needs **right-click > Open**, or:
    ```
    xattr -dr com.apple.quarantine /Applications/MacLinker.app
    ```
-3. Allow **Accessibility** and **Input Monitoring** in System Settings > Privacy & Security. macOS requires this for any app that reads or sends keyboard/mouse input; it cannot be skipped. Restart MacLinker after granting.
-4. On one Mac click **Pair**. Confirm the 6-digit code is identical on both Macs, then confirm on both.
-5. In Devices, choose which side the other Mac sits on. Push the pointer against that edge to cross.
+2. Allow **Accessibility** and **Input Monitoring** in System Settings > Privacy & Security. macOS requires this for any app that reads or sends keyboard/mouse input; it cannot be skipped. Restart MacLinker after granting.
+3. On one Mac click **Pair**. Confirm the 6-digit code is identical on both Macs, then confirm on both.
+4. In Devices, choose which side the other Mac sits on. Push the pointer against that edge to cross.
 
 Emergency exit while controlling the other Mac: **Control + Option + Command + Esc**.
+
+Updates install themselves: Settings > Updates > Check Now, then Restart & Update.
 
 ## Tips for the lowest latency
 
@@ -48,6 +64,17 @@ Use a USB-C/Thunderbolt cable between the Macs (Thunderbolt Bridge appears in Sy
 ## Using it with a VPN (e.g. Outline)
 
 A VPN installs a system tunnel and sends most traffic through it. MacLinker binds its connections to the physical interface so Mac-to-Mac traffic stays local. Both Macs need to be on the same local network (or cable). A VPN client can't connect two Macs to each other by itself.
+
+## How it works
+
+```
+ Mac A                                             Mac B
+ event taps (own thread) ──► batch @ ~300 Hz ──► encrypted TCP ──► input thread ──► CGEvent
+ clipboard / files      ───────────────────────►                ──► pasteboard / Downloads
+            Bonjour discovery  +  pairing  +  reconnect  +  VPN-aware interface pinning
+```
+
+Input capture, batching and injection run on a dedicated high-priority thread, so a busy UI never delays the pointer. While the pointer is on its own Mac the event tap is listen-only and adds no latency.
 
 ## Security
 
@@ -66,6 +93,10 @@ MACLINKER_SIGN_IDENTITY=- ./scripts/bundle.sh     # ad-hoc signed universal app 
 ```
 
 For a signing identity that keeps your permissions across rebuilds, run `scripts/setup_signing.sh` once (creates a local self-signed certificate) and omit `MACLINKER_SIGN_IDENTITY`. Maintainers publish with `scripts/release.sh <version>`.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). CI builds a universal binary and runs the tests on every push.
 
 ## Status
 

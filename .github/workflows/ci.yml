@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Build (universal)
+        run: swift build -c release --arch arm64 --arch x86_64
+      - name: Test
+        run: swift test
+      - name: Bundle app (ad-hoc signed)
+        run: MACLINKER_SIGN_IDENTITY=- ./scripts/bundle.sh
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacLinker-ci-build
+          path: build/MacLinker.zip
+
+  lint:
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install swiftlint
+      - run: swiftlint --strict

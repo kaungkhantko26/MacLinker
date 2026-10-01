@@ -1,0 +1,44 @@
+# Releases are normally published locally with scripts/release.sh, signed with the maintainer's
+# certificate (the in-app updater only accepts updates signed by that same certificate).
+# This workflow is opt-in: it only runs if the signing secrets exist, so forks and contributors
+# never publish unsigned builds that the updater would reject.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    runs-on: macos-latest
+    env:
+      HAVE_CERT: ${{ secrets.MACLINKER_CERT_P12_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip if signing secrets are not configured
+        if: env.HAVE_CERT != 'true'
+        run: echo "No MACLINKER_CERT_P12_BASE64 secret; skipping (publish with scripts/release.sh)."
+      - name: Import signing certificate
+        if: env.HAVE_CERT == 'true'
+        env:
+          CERT: ${{ secrets.MACLINKER_CERT_P12_BASE64 }}
+          PASS: ${{ secrets.MACLINKER_CERT_PASSWORD }}
+        run: |
+          echo "$CERT" | base64 --decode > cert.p12
+          security create-keychain -p ci ci.keychain
+          security default-keychain -s ci.keychain
+          security unlock-keychain -p ci ci.keychain
+          security import cert.p12 -k ci.keychain -P "$PASS" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci ci.keychain
+          rm cert.p12
+      - name: Build, sign, package
+        if: env.HAVE_CERT == 'true'
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          MACLINKER_VERSION="$VERSION" MACLINKER_SIGN_IDENTITY="MacLinker Dev" ./scripts/bundle.sh
+          ./scripts/make_dmg.sh
+      - name: Publish
+        if: env.HAVE_CERT == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" build/MacLinker.zip build/MacLinker.dmg --title "MacLinker ${GITHUB_REF_NAME#v}" --generate-notes

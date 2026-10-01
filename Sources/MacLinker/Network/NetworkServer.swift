@@ -47,8 +47,10 @@ final class NetworkServer {
             case .failed(let e):
                 Log.error("listener failed: \(e)")
                 listener.cancel()
+                // Port taken (for example a second instance): use any free port; Bonjour advertises it.
+                let inUse = (e as? NWError).map { if case .posix(.EADDRINUSE) = $0 { return true } else { return false } } ?? false
                 self.queue.asyncAfter(deadline: .now() + 2) {
-                    if !self.stopped { self.launch(preferredPort: K.defaultPort) }
+                    if !self.stopped { self.launch(preferredPort: inUse ? nil : K.defaultPort) }
                 }
             default: break
             }

@@ -25,7 +25,14 @@ final class ConnectionManager: ObservableObject, SessionDelegate {
     private let trusted: TrustedDevices
     private let queue = DispatchQueue(label: "maclinker.net", qos: .userInteractive)
     private var sessions: [UUID: Session] = [:]
-    private var active: [String: Session] = [:]
+    private var active: [String: Session] = [:] { didSet { publishSendable() } }
+    // `send` is called from the input thread and file-transfer queue, so it reads a locked copy.
+    private let sendLock = NSLock()
+    private var sendable: [String: Session] = [:]
+
+    private func publishSendable() {
+        sendLock.lock(); sendable = active; sendLock.unlock()
+    }
     var listenPort: () -> UInt16 = { K.defaultPort }
 
     init(identity: IdentityManager, trusted: TrustedDevices) {
@@ -72,7 +79,8 @@ final class ConnectionManager: ObservableObject, SessionDelegate {
 
     func send(_ type: MessageType, payload: Data = Data(), to deviceID: String,
               completion: ((Error?) -> Void)? = nil) {
-        guard let s = active[deviceID], s.state == .connected else { completion?(SessionError.notConnected); return }
+        sendLock.lock(); let s = sendable[deviceID]; sendLock.unlock()
+        guard let s else { completion?(SessionError.notConnected); return }
         s.send(type, payload: payload, completion: completion)
     }
 

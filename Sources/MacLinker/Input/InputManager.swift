@@ -25,24 +25,28 @@ final class InputManager: ObservableObject {
         case controlled(peer: String, returnEdge: Edge)
     }
 
+    /// Mirror of the real state for the UI. The real state lives on the input thread.
     @Published private(set) var state: ControlState = .local
-
-    /// Connected peers positioned relative to this Mac, keyed by the edge they sit on.
-    var edgePeers: [Edge: String] = [:]
-    var isEnabled: () -> Bool = { true }
-    var edgePush: () -> Double = { K.defaultEdgePush }
     var send: ((String, MessageType, Data) -> Void)?
 
-    private let monitor = InputMonitor()
+    // Everything below is owned by the input thread; the public methods hop onto it.
+    private let thread = InputThread()
+    private let monitor: InputMonitor
+    private var controlState: ControlState = .local
+    private var enabled = true
+    private var push = K.defaultEdgePush
+    /// Connected peers positioned relative to this Mac, keyed by the edge they sit on.
+    private var edgePeers: [Edge: String] = [:]
     private let injector = InputInjector()
     private var detector = ScreenEdgeDetector()
     private var returnDetector = ScreenEdgeDetector()
     private var virtualCursor = CGPoint.zero
     private var cursorHidden = false
     private var pendingMove = CGPoint.zero
-    private var flushTimer: DispatchSourceTimer?
+    private var flushTimer: CFRunLoopTimer?
 
     init() {
+        monitor = InputMonitor(runLoop: thread.runLoop)
         monitor.onPassive = { [weak self] type, event in self?.handleLocal(type, event) }
         monitor.onActive = { [weak self] type, event in self?.handleActive(type, event) ?? false }
     }
@@ -50,16 +54,30 @@ final class InputManager: ObservableObject {
     var isTapRunning: Bool { monitor.isRunning }
     @discardableResult func startMonitoring() -> Bool { monitor.start() }
 
+    /// Thread-safe: settings and layout changes are applied on the input thread, in order.
+    func configure(enabled: Bool, push: Double, edgePeers: [Edge: String]) {
+        thread.perform {
+            self.enabled = enabled
+            self.push = push
+            self.edgePeers = edgePeers
+        }
+    }
+
+    private func setState(_ new: ControlState) {
+        controlState = new
+        DispatchQueue.main.async { self.state = new }
+    }
+
     // MARK: Local events (controller side)
 
     /// Passive tap: the pointer is on this Mac. Only watches for the edge push.
     private func handleLocal(_ type: CGEventType, _ event: CGEvent) {
-        guard case .local = state, type == .mouseMoved || type == .leftMouseDragged
+        guard case .local = controlState, type == .mouseMoved || type == .leftMouseDragged
                 || type == .rightMouseDragged || type == .otherMouseDragged,
-              isEnabled(), !edgePeers.isEmpty else { return }
+              enabled, !edgePeers.isEmpty else { return }
         let delta = CGPoint(x: event.getDoubleValueField(.mouseEventDeltaX),
                             y: event.getDoubleValueField(.mouseEventDeltaY))
-        detector.threshold = edgePush()
+        detector.threshold = push
         if let hit = detector.update(location: event.location, delta: delta,
                                      bounds: ScreenGeometry.bounds, edges: Set(edgePeers.keys)),
            let peer = edgePeers[hit.edge], NSEvent.pressedMouseButtons == 0 {
@@ -69,12 +87,12 @@ final class InputManager: ObservableObject {
 
     /// Active tap (only enabled while controlling): swallow local input and stream it to the peer.
     private func handleActive(_ type: CGEventType, _ event: CGEvent) -> Bool {
-        guard case .controlling(let peer, _) = state else { return false }
+        guard case .controlling(let peer, _) = controlState else { return false }
         return forward(type, event, to: peer)
     }
 
     private func beginControlling(peer: String, edge: Edge, position: Float) {
-        state = .controlling(peer: peer, edge: edge)
+        setState(.controlling(peer: peer, edge: edge))
         monitor.setActive(true)
         CGAssociateMouseAndMouseCursorPosition(0)
         if !cursorHidden {
@@ -90,10 +108,10 @@ final class InputManager: ObservableObject {
     /// receiver, which is what makes the remote pointer lag. Batch movement at ~250 Hz instead.
     private func startFlushing(to peer: String) {
         pendingMove = .zero
-        let t = DispatchSource.makeTimerSource(queue: .main)
-        t.schedule(deadline: .now(), repeating: .milliseconds(3), leeway: .milliseconds(1))
-        t.setEventHandler { [weak self] in self?.flushMove(to: peer) }
-        t.resume()
+        let t = CFRunLoopTimerCreateWithHandler(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent(), 0.003, 0, 0) { [weak self] _ in
+            self?.flushMove(to: peer)
+        }
+        CFRunLoopAddTimer(CFRunLoopGetCurrent(), t, .commonModes)
         flushTimer = t
     }
 
@@ -105,9 +123,10 @@ final class InputManager: ObservableObject {
     }
 
     private func endControlling(warpTo position: Float?) {
-        guard case .controlling(_, let edge) = state else { return }
+        guard case .controlling(_, let edge) = controlState else { return }
         monitor.setActive(false)
-        flushTimer?.cancel(); flushTimer = nil
+        if let t = flushTimer { CFRunLoopTimerInvalidate(t) }
+        flushTimer = nil
         pendingMove = .zero
         if let position {
             CGWarpMouseCursorPosition(edge.point(at: position, inset: 6, in: ScreenGeometry.bounds))
@@ -115,7 +134,7 @@ final class InputManager: ObservableObject {
         CGAssociateMouseAndMouseCursorPosition(1)
         if cursorHidden { CGDisplayShowCursor(CGMainDisplayID()); cursorHidden = false }
         detector.reset()
-        state = .local
+        setState(.local)
     }
 
     /// Emergency exit: Control + Option + Command + Esc.
@@ -171,22 +190,26 @@ final class InputManager: ObservableObject {
     // MARK: Remote messages
 
     func handle(message: MacLinkerMessage, from peer: String) {
+        thread.perform { self.process(message, from: peer) }
+    }
+
+    private func process(_ message: MacLinkerMessage, from peer: String) {
         do {
             switch message.type {
             case .enterControl:
-                guard isEnabled(), state == .local else {
+                guard enabled, case .local = controlState else {
                     send?(peer, .releaseControl, ControlPayload(edge: .left, position: -1).encode())
                     return
                 }
                 let p = try ControlPayload.decode(message.payload)
                 let returnEdge = p.edge.opposite
                 virtualCursor = returnEdge.point(at: p.position, inset: 2, in: ScreenGeometry.bounds)
-                returnDetector = ScreenEdgeDetector(threshold: edgePush())
-                state = .controlled(peer: peer, returnEdge: returnEdge)
+                returnDetector = ScreenEdgeDetector(threshold: push)
+                setState(.controlled(peer: peer, returnEdge: returnEdge))
                 injector.warp(to: virtualCursor)
             case .releaseControl:
                 let p = try ControlPayload.decode(message.payload)
-                switch state {
+                switch controlState {
                 case .controlling(let controlled, _) where controlled == peer:
                     endControlling(warpTo: p.position >= 0 ? p.position : nil)
                 case .controlled(let controller, _) where controller == peer:
@@ -194,7 +217,7 @@ final class InputManager: ObservableObject {
                 default: break
                 }
             case .mouseMove:
-                guard case .controlled(let controller, let returnEdge) = state, controller == peer else { return }
+                guard case .controlled(let controller, let returnEdge) = controlState, controller == peer else { return }
                 let p = try MouseMovePayload.decode(message.payload)
                 let delta = CGPoint(x: CGFloat(p.dx), y: CGFloat(p.dy))
                 let b = ScreenGeometry.bounds
@@ -229,19 +252,23 @@ final class InputManager: ObservableObject {
     }
 
     private func isControlled(by peer: String) -> Bool {
-        if case .controlled(let c, _) = state { return c == peer }
+        if case .controlled(let c, _) = controlState { return c == peer }
         return false
     }
 
     private func endControlled() {
         injector.releaseAll(at: virtualCursor)
         returnDetector.reset()
-        state = .local
+        setState(.local)
     }
 
     /// A peer vanished: never leave the pointer frozen or keys stuck.
     func peerDisconnected(_ peer: String) {
-        switch state {
+        thread.perform { self.handleDisconnect(peer) }
+    }
+
+    private func handleDisconnect(_ peer: String) {
+        switch controlState {
         case .controlling(let p, _) where p == peer: endControlling(warpTo: 0.5)
         case .controlled(let p, _) where p == peer: endControlled()
         default: break
@@ -250,10 +277,12 @@ final class InputManager: ObservableObject {
 
     /// Sharing was switched off or the peer layout changed under us.
     func abortIfNeeded() {
-        if case .controlling(let peer, _) = state, !isEnabled() {
-            send?(peer, .releaseControl, ControlPayload(edge: .left, position: -1).encode())
-            endControlling(warpTo: nil)
+        thread.perform {
+            if case .controlling(let peer, _) = self.controlState, !self.enabled {
+                self.send?(peer, .releaseControl, ControlPayload(edge: .left, position: -1).encode())
+                self.endControlling(warpTo: nil)
+            }
+            if case .controlled = self.controlState, !self.enabled { self.endControlled() }
         }
-        if case .controlled = state, !isEnabled() { endControlled() }
     }
 }
