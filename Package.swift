@@ -5,7 +5,8 @@ let package = Package(
     name: "MacLinker",
     platforms: [.macOS(.v13)],
     targets: [
-        .executableTarget(name: "MacLinker", path: "Sources/MacLinker"),
+        .target(name: "CVirtualDisplay", path: "Sources/CVirtualDisplay", linkerSettings: [.linkedFramework("CoreGraphics")]),
+        .executableTarget(name: "MacLinker", dependencies: ["CVirtualDisplay"], path: "Sources/MacLinker"),
         .testTarget(name: "MacLinkerTests", dependencies: ["MacLinker"], path: "Tests/MacLinkerTests"),
     ]
 )

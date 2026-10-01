@@ -5,6 +5,8 @@ import ApplicationServices
 final class PermissionManager: ObservableObject {
     @Published private(set) var accessibility = false
     @Published private(set) var inputMonitoring = false
+    /// Only needed on the Mac that shares its desktop as a second display.
+    @Published private(set) var screenRecording = false
     private var timer: Timer?
 
     var allGranted: Bool { accessibility && inputMonitoring }
@@ -22,6 +24,8 @@ final class PermissionManager: ObservableObject {
         let i = CGPreflightListenEventAccess()
         if a != accessibility { accessibility = a }
         if i != inputMonitoring { inputMonitoring = i }
+        let r = CGPreflightScreenCaptureAccess()
+        if r != screenRecording { screenRecording = r }
     }
 
     func requestAccessibility() {
@@ -29,6 +33,7 @@ final class PermissionManager: ObservableObject {
     }
 
     func requestInputMonitoring() { _ = CGRequestListenEventAccess() }
+    func requestScreenRecording() { _ = CGRequestScreenCaptureAccess() }
 
     /// Tries the current Settings deep link, then the older one, then just opens System Settings.
     func openPrivacySettings(_ pane: String) {

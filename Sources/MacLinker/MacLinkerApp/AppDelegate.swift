@@ -14,6 +14,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    /// Quitting must never leave a display stuck full-screen on the viewer or a virtual display on the host.
+    func applicationWillTerminate(_ notification: Notification) {
+        AppState.shared.display.stop()
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
 

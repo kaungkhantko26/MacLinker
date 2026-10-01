@@ -19,6 +19,7 @@ final class AppState: ObservableObject {
     let server = NetworkServer()
     let updater = Updater()
     let system = RemoteSystemManager()
+    let display = DisplaySharingManager()
     let discovery: DeviceDiscoveryManager
     let connections: ConnectionManager
     let reconnect: ReconnectManager
@@ -52,7 +53,7 @@ final class AppState: ObservableObject {
             permissions.objectWillChange.eraseToAnyPublisher(), paths.objectWillChange.eraseToAnyPublisher(),
             pairing.objectWillChange.eraseToAnyPublisher(), input.objectWillChange.eraseToAnyPublisher(),
             files.objectWillChange.eraseToAnyPublisher(), discovery.objectWillChange.eraseToAnyPublisher(),
-            connections.objectWillChange.eraseToAnyPublisher(), updater.objectWillChange.eraseToAnyPublisher(), system.objectWillChange.eraseToAnyPublisher(),
+            connections.objectWillChange.eraseToAnyPublisher(), updater.objectWillChange.eraseToAnyPublisher(), system.objectWillChange.eraseToAnyPublisher(), display.objectWillChange.eraseToAnyPublisher(),
         ].map { $0.map { _ in () }.eraseToAnyPublisher() }
         changes.forEach { $0.receive(on: DispatchQueue.main).sink { [weak self] in
             self?.objectWillChange.send()
@@ -72,6 +73,7 @@ final class AppState: ObservableObject {
             self?.input.peerDisconnected(id)
             self?.files.peerDisconnected()
             self?.system.peerDisconnected(id)
+            self?.display.peerDisconnected(id)
         }
         pairing.onPresent = { WindowManager.shared.showPairing() }
 
@@ -86,6 +88,17 @@ final class AppState: ObservableObject {
             return !Updater.isNewer(K.systemControlMinVersion, than: v)
         }
         system.send = { [weak self] id, type, payload in self?.connections.send(type, payload: payload, to: id) }
+
+        display.send = { [weak self] id, type, payload, done in
+            self?.connections.send(type, payload: payload, to: id, completion: done)
+        }
+        display.peerName = { [weak self] id in self?.connections.peers[id]?.name ?? self?.trusted.device(id)?.name ?? id }
+        display.peerSupports = { [weak self] id in
+            guard let v = self?.connections.peers[id]?.appVersion else { return false }
+            return !Updater.isNewer(K.displayMinVersion, than: v)
+        }
+        display.autoAccept = { [weak self] in self?.settings.displayAutoAccept ?? false }
+        display.quality = { [weak self] in DisplaySharingManager.Quality(rawValue: self?.settings.displayQuality ?? "") ?? .balanced }
 
         files.isEnabled = { [weak self] in self?.settings.fileSharing ?? false }
         files.peerName = { [weak self] id in self?.trusted.device(id)?.name ?? id }
@@ -137,6 +150,9 @@ final class AppState: ObservableObject {
             clipboard.receive(msg.payload)
         case .fileOffer, .fileChunk, .fileEnd, .fileAbort:
             files.handle(message: msg, from: id)
+        case .displayOffer, .displayAccept, .displayStart, .displayConfig, .displayFrame, .displayStop,
+             .displayPointer, .displayScroll, .displayKey, .displayFlags, .displayKeyframeRequest:
+            display.handle(msg, from: id)
         case .systemControl, .systemState, .systemQuery:
             system.handle(msg, from: id)
         case .layout:
@@ -201,6 +217,11 @@ final class AppState: ObservableObject {
     private func connect(address ep: NWEndpoint) {
         let pin = settings.pinToLAN && (ep.hostString.map(NetworkPathWatcher.isLANHost) ?? false)
         connections.connect(to: ep, expectedID: nil, interface: pin ? paths.lanInterface : nil)
+    }
+
+    func supportsDisplay(_ id: String) -> Bool {
+        guard let v = connections.peers[id]?.appVersion else { return false }
+        return !Updater.isNewer(K.displayMinVersion, than: v)
     }
 
     func disconnect(_ id: String) { connections.disconnect(id) }

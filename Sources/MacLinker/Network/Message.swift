@@ -27,6 +27,18 @@ enum MessageType: UInt8 {
     case systemState = 51
     case systemQuery = 52
 
+    case displayOffer = 60
+    case displayAccept = 61
+    case displayStart = 62
+    case displayConfig = 63
+    case displayFrame = 64
+    case displayStop = 65
+    case displayPointer = 66
+    case displayScroll = 67
+    case displayKey = 68
+    case displayFlags = 69
+    case displayKeyframeRequest = 70
+
     /// Messages that may flow before the peer is paired/trusted.
     var isHandshakePhase: Bool {
         switch self {
@@ -214,5 +226,97 @@ struct SystemStatePayload: BinaryPayload, Equatable {
         var r = ByteReader(data)
         return Self(hasBrightness: try r.bool(), hasVolume: try r.bool(), brightness: try r.f32(),
                     volume: try r.f32(), muted: try r.bool())
+    }
+}
+
+// MARK: - Second display
+
+/// Viewer's answer to an offer, with the size of the screen the picture will fill (in points).
+struct DisplayAcceptPayload: BinaryPayload, Equatable {
+    var accepted: Bool
+    var width: UInt32
+    var height: UInt32
+    var scale: Float
+
+    func encode() -> Data { var w = ByteWriter(); w.bool(accepted); w.u32(width); w.u32(height); w.f32(scale); return w.data }
+    static func decode(_ data: Data) throws -> Self {
+        var r = ByteReader(data)
+        return Self(accepted: try r.bool(), width: try r.u32(), height: try r.u32(), scale: try r.f32())
+    }
+}
+
+/// Host announces the stream: the pixel size of the video and its frame rate.
+struct DisplayStartPayload: BinaryPayload, Equatable {
+    var width: UInt32
+    var height: UInt32
+    var fps: UInt8
+
+    func encode() -> Data { var w = ByteWriter(); w.u32(width); w.u32(height); w.u8(fps); return w.data }
+    static func decode(_ data: Data) throws -> Self {
+        var r = ByteReader(data)
+        return Self(width: try r.u32(), height: try r.u32(), fps: try r.u8())
+    }
+}
+
+/// H.264 parameter sets (SPS, PPS) the viewer needs before it can decode.
+struct DisplayConfigPayload: BinaryPayload, Equatable {
+    var parameterSets: [Data]
+
+    func encode() -> Data {
+        var w = ByteWriter()
+        w.u8(UInt8(parameterSets.count))
+        for set in parameterSets { w.u32(UInt32(set.count)); w.bytes(set) }
+        return w.data
+    }
+    static func decode(_ data: Data) throws -> Self {
+        var r = ByteReader(data)
+        let count = Int(try r.u8())
+        guard count > 0, count <= 4 else { throw MessageError.malformed }
+        var sets: [Data] = []
+        for _ in 0..<count {
+            let len = Int(try r.u32())
+            guard len > 0, len <= 4096 else { throw MessageError.malformed }
+            sets.append(try r.bytes(len))
+        }
+        return Self(parameterSets: sets)
+    }
+}
+
+/// One encoded video frame (H.264, 4-byte length-prefixed NAL units).
+struct DisplayFramePayload: BinaryPayload, Equatable {
+    var keyframe: Bool
+    var timestampMs: UInt64
+    var data: Data
+
+    func encode() -> Data { var w = ByteWriter(); w.bool(keyframe); w.u64(timestampMs); w.bytes(data); return w.data }
+    static func decode(_ data: Data) throws -> Self {
+        var r = ByteReader(data)
+        let key = try r.bool(), ts = try r.u64()
+        let rest = r.rest()
+        guard !rest.isEmpty else { throw MessageError.malformed }
+        return Self(keyframe: key, timestampMs: ts, data: rest)
+    }
+}
+
+/// Pointer events from the viewer, with positions normalised to 0...1 across the picture.
+struct DisplayPointerPayload: BinaryPayload, Equatable {
+    enum Kind: UInt8 { case move = 0, down = 1, up = 2, drag = 3 }
+    var kind: Kind
+    var button: UInt8
+    var x: Float
+    var y: Float
+    var clickCount: UInt8
+
+    func encode() -> Data {
+        var w = ByteWriter()
+        w.u8(kind.rawValue); w.u8(button); w.f32(x); w.f32(y); w.u8(clickCount)
+        return w.data
+    }
+    static func decode(_ data: Data) throws -> Self {
+        var r = ByteReader(data)
+        guard let kind = Kind(rawValue: try r.u8()) else { throw MessageError.malformed }
+        let button = try r.u8(), x = try r.f32(), y = try r.f32(), clicks = try r.u8()
+        guard x.isFinite, y.isFinite else { throw MessageError.malformed }
+        return Self(kind: kind, button: button, x: min(max(x, 0), 1), y: min(max(y, 0), 1), clickCount: clicks)
     }
 }
