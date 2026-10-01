@@ -50,19 +50,6 @@ final class WindowManager {
         present(pairingWindow)
     }
 
-    private var suspended: [NSWindow] = []
-
-    /// While controlling another Mac, our own windows are put away so activating the app shows nothing.
-    func suspendForControl() {
-        suspended = [main, pairingWindow].compactMap { $0 }.filter { $0.isVisible }
-        suspended.forEach { $0.orderOut(nil) }
-    }
-
-    func resumeAfterControl() {
-        suspended.forEach { $0.orderFront(nil) }
-        suspended = []
-    }
-
     func hidePairing() { pairingWindow?.orderOut(nil) }
 
     private func present(_ w: NSWindow?) {

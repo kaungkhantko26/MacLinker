@@ -7,8 +7,9 @@ import CoreGraphics
 /// 1. The recipe used by Synergy/Barrier/Deskflow: tell the WindowServer this app may set the cursor
 ///    while in the background (private `SetsCursorInBackground`), then `CGDisplayHideCursor` on the
 ///    display the pointer is on.
-/// 2. Also become the frontmost app for the duration (its own windows tucked away), since macOS
-///    honours "hide cursor" for the frontmost app unconditionally. Focus is handed back afterwards.
+/// 2. If MacLinker has no window open, also become the frontmost app for the duration (nothing visible
+///    changes), since macOS honours "hide cursor" for the frontmost app unconditionally; focus is handed
+///    back afterwards. If a MacLinker window is open it is never moved, hidden or raised.
 /// Main thread only.
 enum CursorHider {
     private static var hidden = false
@@ -53,8 +54,8 @@ enum CursorHider {
         let me = NSRunningApplication.current
         let front = NSWorkspace.shared.frontmostApplication
         previousApp = front?.processIdentifier == me.processIdentifier ? nil : front
-        WindowManager.shared.suspendForControl()
-        NSApp.activate(ignoringOtherApps: true)
+        let ownWindowOpen = NSApp.windows.contains { $0.isVisible && $0.canBecomeMain }
+        if !ownWindowOpen { NSApp.activate(ignoringOtherApps: true) } else { previousApp = nil }
         hiddenOn = pointerDisplay
         CGDisplayHideCursor(hiddenOn)
         NSCursor.hide()
@@ -65,7 +66,6 @@ enum CursorHider {
         hidden = false
         CGDisplayShowCursor(hiddenOn)
         NSCursor.unhide()
-        WindowManager.shared.resumeAfterControl()
         previousApp?.activate()
         previousApp = nil
     }
