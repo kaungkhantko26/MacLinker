@@ -1,5 +1,5 @@
-import XCTes
-import CryptoKi
+import XCTest
+import CryptoKit
 @testable import MacLinker
 
 final class HandshakeTests: XCTestCase {
@@ -155,7 +155,7 @@ final class UpdaterTests: XCTestCase {
 
     func testInstallScriptSwapsAppAndRestoresOnFailure() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let fm = FileManager.defaul
+        let fm = FileManager.default
         let staged = root.appendingPathComponent("new/X.app/Contents"), dest = root.appendingPathComponent("dest/X.app/Contents")
         try fm.createDirectory(at: staged, withIntermediateDirectories: true)
         try fm.createDirectory(at: dest, withIntermediateDirectories: true)
@@ -349,7 +349,7 @@ final class HubLogicTests: XCTestCase {
         XCTAssertEqual(h.entries.count, 1)
         for i in 0..<40 { h.add(text("item \(i)"), source: "x") }
         XCTAssertEqual(h.entries.count, ClipboardHistory.limit)
-        XCTAssertEqual(h.entries.first?.preview, "item 39")   // newest firs
+        XCTAssertEqual(h.entries.first?.preview, "item 39")   // newest first
         let big = ClipboardMessage(entries: [.init(type: "public.png", data: Data(count: ClipboardHistory.keepLimit + 1))])
         h.add(big, source: "x")
         XCTAssertNil(h.entries.first?.message, "oversized items are listed but not kept in memory")
