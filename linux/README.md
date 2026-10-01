@@ -17,6 +17,15 @@ and `evdev` rather than a desktop-specific API.
 
 ## Install
 
+Download `maclinker-linux.tar.gz` from the [latest release](https://github.com/kaungkhantko26/MacLinker/releases/latest):
+
+```
+tar xzf maclinker-linux.tar.gz && cd maclinker-linux
+./deploy/install.sh
+```
+
+or build from source:
+
 ```
 git clone https://github.com/kaungkhantko26/MacLinker && cd MacLinker/linux
 ./deploy/install.sh

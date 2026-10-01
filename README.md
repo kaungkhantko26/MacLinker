@@ -67,6 +67,34 @@ Emergency exit while controlling the other Mac: **Control + Option + Command + E
 
 Updates install themselves: Settings > Updates > Check Now, then Restart & Update.
 
+## Linux setup
+
+MacLinker also runs on Linux (X11 or Wayland) and pairs with a Mac the same way two Macs pair, in both directions.
+It is a Python program in [`linux/`](linux/README.md). It needs Python 3.9+ and a one-time permission setup.
+
+1. **Install** on the Linux machine, either from a release or from source:
+   ```
+   # from the release package
+   curl -LO https://github.com/kaungkhantko26/MacLinker/releases/latest/download/maclinker-linux.tar.gz
+   tar xzf maclinker-linux.tar.gz && cd maclinker-linux && ./deploy/install.sh
+
+   # or from source
+   git clone https://github.com/kaungkhantko26/MacLinker && cd MacLinker/linux && ./deploy/install.sh
+   ```
+2. **Allow input access** (once, needs sudo). This lets MacLinker inject and read keyboard and mouse events:
+   ```
+   sudo cp deploy/99-maclinker.rules /etc/udev/rules.d/
+   echo uinput | sudo tee /etc/modules-load.d/maclinker.conf
+   sudo modprobe uinput
+   sudo udevadm control --reload-rules && sudo udevadm trigger
+   sudo usermod -aG input "$USER"      # then log out and back in
+   ```
+3. **Optional extras:** `wl-clipboard` (Wayland) or `xclip` (X11) for clipboard sync, and `pip install 'maclinker[x11]'` so pushing the pointer against a screen edge works on X11.
+4. **Start and pair:** `systemctl --user enable --now maclinker`, then `maclinker status`. If the Mac isn't listed, use `maclinker connect <mac-ip>`. Check the 6-digit code matches on both sides, confirm on the Mac and run `maclinker confirm` on Linux, then set where the Mac sits: `maclinker position "Mac mini" right`.
+5. **Switch control:** Mac to Linux works by pushing the Mac's pointer against the screen edge. Linux to Mac works the same way on X11. On Wayland, press **Ctrl+Alt+Shift+Space** to move to the Mac and again to come back.
+
+Ctrl and Command are swapped by default, so Ctrl+C on Linux is Cmd+C on the Mac. The Linux side is new and hasn't been tested on every desktop yet: if something misbehaves, run `maclinker run -v` and [open an issue](https://github.com/kaungkhantko26/MacLinker/issues/new/choose) with your distro and whether you use X11 or Wayland. Full details are in [linux/README.md](linux/README.md).
+
 ## For the lowest latency
 
 Use a USB-C/Thunderbolt cable between the Macs (Thunderbolt Bridge appears in System Settings > Network) or Ethernet. Otherwise use 5 GHz Wi-Fi near the router. The Devices tab shows the link in use (`bridge0` = cable, `en0` = Wi-Fi) and live latency.
