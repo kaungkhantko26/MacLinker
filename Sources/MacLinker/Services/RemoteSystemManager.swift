@@ -7,6 +7,8 @@ final class RemoteSystemManager: ObservableObject {
 
     var isAllowed: () -> Bool = { true }
     var send: ((String, MessageType, Data) -> Void)?
+    /// Whether the peer is new enough to understand brightness/volume messages.
+    var peerSupports: (String) -> Bool = { _ in false }
 
     private let controller = SystemController()
     /// DDC writes are slow and blocking, so they never run on the main thread.
@@ -17,6 +19,7 @@ final class RemoteSystemManager: ObservableObject {
     // MARK: Telling peers about this Mac
 
     func announce(to peer: String) {
+        guard peerSupports(peer) else { return }
         queue.async {
             let state = self.controller.state()
             self.send?(peer, .systemState, state.encode())
@@ -33,7 +36,7 @@ final class RemoteSystemManager: ObservableObject {
     func handle(_ message: MacLinkerMessage, from peer: String) {
         switch message.type {
         case .systemQuery:
-            announce(to: peer)
+            announce(to: peer)  // (already gated on the peer's version)
         case .systemState:
             if let s = try? SystemStatePayload.decode(message.payload) { states[peer] = s }
         case .systemControl:
@@ -52,7 +55,10 @@ final class RemoteSystemManager: ObservableObject {
 
     // MARK: Controlling a peer
 
-    func refresh(_ peer: String) { send?(peer, .systemQuery, Data()) }
+    func refresh(_ peer: String) {
+        guard peerSupports(peer) else { return }
+        send?(peer, .systemQuery, Data())
+    }
 
     /// Called as a slider moves; sends at most one update per ~80 ms and always the latest value.
     func set(_ kind: SystemControlPayload.Kind, _ value: Float, on peer: String) {
@@ -64,6 +70,7 @@ final class RemoteSystemManager: ObservableObject {
             }
             states[peer] = s
         }
+        guard peerSupports(peer) else { return }
         pending[peer, default: [:]][kind] = value
         guard !flushScheduled.contains(peer) else { return }
         flushScheduled.insert(peer)

@@ -43,7 +43,8 @@ final class ReconnectManager {
             // Plugged in a cable after connecting over Wi-Fi? Move to the faster link.
             if let peer = connections.peers[device.id], peer.state == .connected, let current = peer.linkRank,
                let better = discovery.discovered[device.id]?.interface.flatMap(NetworkPathWatcher.rank),
-               better < current, now.timeIntervalSince(lastUpgrade[device.id] ?? .distantPast) > 30 {
+               better < current, peer.link?.hasPrefix("bridge") != true,
+               now.timeIntervalSince(lastUpgrade[device.id] ?? .distantPast) > 300 {
                 lastUpgrade[device.id] = now
                 Log.info("switching \(device.name) to a faster link")
                 connections.disconnect(device.id)

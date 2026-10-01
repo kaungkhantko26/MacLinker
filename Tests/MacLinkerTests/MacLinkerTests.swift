@@ -264,3 +264,23 @@ final class SystemControlTests: XCTestCase {
         XCTAssertTrue(s.volume == -1 || (0...1).contains(s.volume))
     }
 }
+
+final class CompatibilityTests: XCTestCase {
+    func testOlderPeersAreNotSentNewMessages() {
+        func supports(_ v: String) -> Bool { !Updater.isNewer(K.systemControlMinVersion, than: v) }
+        XCTAssertFalse(supports("1.0"))     // old builds report a fixed "1.0"
+        XCTAssertFalse(supports("1.1.1"))
+        XCTAssertFalse(supports("0"))
+        XCTAssertTrue(supports("1.2.0"))
+        XCTAssertTrue(supports("1.3.0"))
+    }
+
+    func testUnknownMessageTypeIsReportedNotCrashing() {
+        let data = MessageProtocol.encode(type: .heartbeat, sequence: 1, payload: Data())
+        var bad = data
+        bad[bad.startIndex + 5] = 250   // type byte
+        XCTAssertThrowsError(try MessageProtocol.decode(bad)) { error in
+            guard case MessageError.unknownType(250) = error else { return XCTFail("wrong error \(error)") }
+        }
+    }
+}

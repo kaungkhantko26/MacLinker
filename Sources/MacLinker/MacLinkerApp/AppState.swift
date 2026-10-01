@@ -81,6 +81,10 @@ final class AppState: ObservableObject {
         clipboard.broadcast = { [weak self] payload in self?.connections.broadcast(.clipboard, payload: payload) }
 
         system.isAllowed = { [weak self] in self?.settings.remoteSystemControl ?? false }
+        system.peerSupports = { [weak self] id in
+            guard let v = self?.connections.peers[id]?.appVersion else { return false }
+            return !Updater.isNewer(K.systemControlMinVersion, than: v)
+        }
         system.send = { [weak self] id, type, payload in self?.connections.send(type, payload: payload, to: id) }
 
         files.isEnabled = { [weak self] in self?.settings.fileSharing ?? false }

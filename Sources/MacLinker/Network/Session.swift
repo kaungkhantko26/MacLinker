@@ -7,6 +7,8 @@ struct PeerInfo: Equatable {
     var name: String
     var publicKey: Data
     var port: UInt16
+    /// Peers older than 1.0.3 reported a fixed "1.0", which is fine: it just means "old".
+    var appVersion: String = "0"
 }
 
 enum SessionError: Error {
@@ -160,12 +162,19 @@ final class Session {
             peer = PeerInfo(deviceID: pid, name: "", publicKey: pub, port: 0)
             let hello = HelloPayload(name: identity.deviceName, deviceID: identity.deviceID,
                                      trustsYou: isTrusted(pub), port: listenPort(),
-                                     appVersion: "1.0")
+                                     appVersion: K.appVersion)
             try sendOnQueue(.hello, payload: JSONEncoder().encode(hello))
         case .secure:
             guard let codec else { throw SessionError.notConnected }
             let plain = try codec.open(frame)
-            try handle(message: try MessageProtocol.decode(plain))
+            let message: MacLinkerMessage
+            do { message = try MessageProtocol.decode(plain) }
+            catch MessageError.unknownType(let t) {
+                // A newer peer sent something we don't know. Skip it instead of dropping the link.
+                Log.info("ignoring unknown message type \(t)")
+                return
+            }
+            try handle(message: message)
         }
     }
 
@@ -180,6 +189,7 @@ final class Session {
             guard hello.deviceID == info.deviceID else { throw SessionError.protocolViolation("id mismatch") }
             info.name = String(hello.name.prefix(80))
             info.port = hello.port
+            info.appVersion = hello.appVersion
             peer = info
             let iTrustPeer = isTrusted(info.publicKey)
             needsPairing = !(iTrustPeer && hello.trustsYou)

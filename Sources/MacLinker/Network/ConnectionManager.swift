@@ -11,6 +11,7 @@ final class ConnectionManager: ObservableObject, SessionDelegate {
         /// Network interface the session runs over (for example "bridge0" for a USB-C cable, "en0" for Wi-Fi).
         var link: String?
         var linkRank: Int?
+        var appVersion: String = "0"
     }
 
     @Published private(set) var peers: [String: Peer] = [:]
@@ -104,7 +105,7 @@ final class ConnectionManager: ObservableObject, SessionDelegate {
             }
         }
         active[peer.deviceID] = s
-        peers[peer.deviceID] = Peer(id: peer.deviceID, name: peer.name, state: .connecting, latency: nil)
+        peers[peer.deviceID] = Peer(id: peer.deviceID, name: peer.name, state: .connecting, latency: nil, appVersion: peer.appVersion)
     }
 
     func session(_ s: Session, didChange state: Session.State) {
