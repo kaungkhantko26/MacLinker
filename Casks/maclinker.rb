@@ -1,6 +1,6 @@
 cask "maclinker" do
-  version "1.2.0"
-  sha256 "41e3ab13b977a26b292d6b39a15b1af70717187254873f94dc6652e9882b69e7"
+  version "1.2.1"
+  sha256 "6a268a2c4ddb416edb19b32b9ebda6022358c76361e6921375f5d2ddef71b0ea"
 
   url "https://github.com/kaungkhantko26/MacLinker/releases/download/v#{version}/MacLinker.zip"
   name "MacLinker"
