@@ -7,17 +7,18 @@ enum DeviceManager {
         var out: [String: Device] = [:]
         for t in trusted {
             out[t.id] = Device(id: t.id, name: t.name, status: .offline, isTrusted: true,
-                               position: t.position, latency: nil)
+                               position: t.position, latency: nil, link: nil)
         }
         for d in discovered.values {
             if out[d.id] != nil { out[d.id]?.status = .nearby }
-            else { out[d.id] = Device(id: d.id, name: d.name, status: .nearby, isTrusted: false, position: nil, latency: nil) }
+            else { out[d.id] = Device(id: d.id, name: d.name, status: .nearby, isTrusted: false, position: nil, latency: nil, link: nil) }
         }
         for p in peers.values {
             var dev = out[p.id] ?? Device(id: p.id, name: p.name, status: .offline, isTrusted: false,
-                                          position: nil, latency: nil)
+                                          position: nil, latency: nil, link: nil)
             dev.name = p.name.isEmpty ? dev.name : p.name
             dev.latency = p.latency
+            dev.link = p.link
             switch p.state {
             case .connected: dev.status = .connected
             case .pairing: dev.status = .pairing

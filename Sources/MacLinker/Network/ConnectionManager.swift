@@ -8,6 +8,9 @@ final class ConnectionManager: ObservableObject, SessionDelegate {
         var name: String
         var state: State
         var latency: Double?
+        /// Network interface the session runs over (for example "bridge0" for a USB-C cable, "en0" for Wi-Fi).
+        var link: String?
+        var linkRank: Int?
     }
 
     @Published private(set) var peers: [String: Peer] = [:]
@@ -113,6 +116,9 @@ final class ConnectionManager: ObservableObject, SessionDelegate {
                     $0.lastPort = s.role == .initiator ? s.connection.endpoint.portValue : peerInfo.port
                 }
             }
+            let iface = s.connection.currentPath?.availableInterfaces.first
+            peers[id]?.link = iface?.name
+            peers[id]?.linkRank = iface.flatMap(NetworkPathWatcher.rank)
             peers[id]?.state = .connected
             onPairingEnded?(s)
             onConnected?(id)

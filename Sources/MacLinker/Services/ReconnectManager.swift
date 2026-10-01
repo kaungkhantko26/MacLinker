@@ -15,6 +15,7 @@ final class ReconnectManager {
     private var offlineSince: [String: Date] = [:]
     private var nextAttempt: [String: Date] = [:]
     private var failures: [String: Int] = [:]
+    private var lastUpgrade: [String: Date] = [:]
 
     init(identity: IdentityManager, trusted: TrustedDevices, discovery: DeviceDiscoveryManager,
          connections: ConnectionManager, settings: Settings, paths: NetworkPathWatcher) {
@@ -39,6 +40,15 @@ final class ReconnectManager {
     private func tick() {
         let now = Date()
         for device in trusted.devices {
+            // Plugged in a cable after connecting over Wi-Fi? Move to the faster link.
+            if let peer = connections.peers[device.id], peer.state == .connected, let current = peer.linkRank,
+               let better = discovery.discovered[device.id]?.interface.flatMap(NetworkPathWatcher.rank),
+               better < current, now.timeIntervalSince(lastUpgrade[device.id] ?? .distantPast) > 30 {
+                lastUpgrade[device.id] = now
+                Log.info("switching \(device.name) to a faster link")
+                connections.disconnect(device.id)
+                continue
+            }
             if connections.hasSession(for: device.id) { reset(device.id); continue }
             let since = offlineSince[device.id] ?? now
             offlineSince[device.id] = since

@@ -89,7 +89,10 @@ extension Device.Status {
 extension Device {
     var statusText: String {
         switch status {
-        case .connected: return latency.map { String(format: "Connected · %.0f ms", $0) } ?? "Connected"
+        case .connected:
+            let ms = latency.map { String(format: " · %.0f ms", $0) } ?? ""
+            let via = link.map { $0.hasPrefix("bridge") ? " · USB-C cable (\($0))" : " · \($0)" } ?? ""
+            return "Connected" + ms + via
         case .pairing: return "Waiting for pairing"
         case .connecting: return "Connecting…"
         case .nearby: return isTrusted ? "Nearby" : "Nearby · not paired"

@@ -43,7 +43,8 @@ final class InputManager: ObservableObject {
     private var flushTimer: DispatchSourceTimer?
 
     init() {
-        monitor.handler = { [weak self] type, event in self?.handle(type, event) ?? false }
+        monitor.onPassive = { [weak self] type, event in self?.handleLocal(type, event) }
+        monitor.onActive = { [weak self] type, event in self?.handleActive(type, event) ?? false }
     }
 
     var isTapRunning: Bool { monitor.isRunning }
@@ -51,29 +52,30 @@ final class InputManager: ObservableObject {
 
     // MARK: Local events (controller side)
 
-    private func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
-        switch state {
-        case .controlled:
-            return false
-        case .local:
-            guard type == .mouseMoved || type == .leftMouseDragged || type == .rightMouseDragged
-                    || type == .otherMouseDragged, isEnabled(), !edgePeers.isEmpty else { return false }
-            let delta = CGPoint(x: event.getDoubleValueField(.mouseEventDeltaX),
-                                y: event.getDoubleValueField(.mouseEventDeltaY))
-            detector.threshold = edgePush()
-            if let hit = detector.update(location: event.location, delta: delta,
-                                         bounds: ScreenGeometry.bounds, edges: Set(edgePeers.keys)),
-               let peer = edgePeers[hit.edge], NSEvent.pressedMouseButtons == 0 {
-                beginControlling(peer: peer, edge: hit.edge, position: hit.position)
-            }
-            return false
-        case .controlling(let peer, _):
-            return forward(type, event, to: peer)
+    /// Passive tap: the pointer is on this Mac. Only watches for the edge push.
+    private func handleLocal(_ type: CGEventType, _ event: CGEvent) {
+        guard case .local = state, type == .mouseMoved || type == .leftMouseDragged
+                || type == .rightMouseDragged || type == .otherMouseDragged,
+              isEnabled(), !edgePeers.isEmpty else { return }
+        let delta = CGPoint(x: event.getDoubleValueField(.mouseEventDeltaX),
+                            y: event.getDoubleValueField(.mouseEventDeltaY))
+        detector.threshold = edgePush()
+        if let hit = detector.update(location: event.location, delta: delta,
+                                     bounds: ScreenGeometry.bounds, edges: Set(edgePeers.keys)),
+           let peer = edgePeers[hit.edge], NSEvent.pressedMouseButtons == 0 {
+            beginControlling(peer: peer, edge: hit.edge, position: hit.position)
         }
+    }
+
+    /// Active tap (only enabled while controlling): swallow local input and stream it to the peer.
+    private func handleActive(_ type: CGEventType, _ event: CGEvent) -> Bool {
+        guard case .controlling(let peer, _) = state else { return false }
+        return forward(type, event, to: peer)
     }
 
     private func beginControlling(peer: String, edge: Edge, position: Float) {
         state = .controlling(peer: peer, edge: edge)
+        monitor.setActive(true)
         CGAssociateMouseAndMouseCursorPosition(0)
         if !cursorHidden {
             _ = allowBackgroundCursor
@@ -104,6 +106,7 @@ final class InputManager: ObservableObject {
 
     private func endControlling(warpTo position: Float?) {
         guard case .controlling(_, let edge) = state else { return }
+        monitor.setActive(false)
         flushTimer?.cancel(); flushTimer = nil
         pendingMove = .zero
         if let position {

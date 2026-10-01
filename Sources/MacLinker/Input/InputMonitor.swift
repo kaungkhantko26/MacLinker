@@ -1,16 +1,29 @@
 import Foundation
 import CoreGraphics
 
-/// Session-wide event tap for mouse and keyboard (the "MouseMonitor + KeyboardMonitor" in one,
-/// because macOS delivers both through a single tap). Runs on the main run loop.
+/// Two session-wide event taps:
+///
+/// - **passive** (listen-only, always on): used while the pointer is on this Mac. A listen-only tap
+///   never sits in the event path, so it adds zero latency to normal mouse and keyboard use.
+/// - **active** (can swallow events, enabled only while controlling another Mac): blocks local
+///   input and forwards it to the peer.
 final class InputMonitor {
+    var onPassive: ((CGEventType, CGEvent) -> Void)?
     /// Return true to swallow the event.
-    var handler: ((CGEventType, CGEvent) -> Bool)?
+    var onActive: ((CGEventType, CGEvent) -> Bool)?
 
-    private var tap: CFMachPort?
-    private var source: CFRunLoopSource?
+    fileprivate final class Context {
+        unowned let monitor: InputMonitor
+        let isActive: Bool
+        init(_ m: InputMonitor, active: Bool) { monitor = m; isActive = active }
+    }
 
-    var isRunning: Bool { tap != nil }
+    private var passiveTap: CFMachPort?
+    private var activeTap: CFMachPort?
+    private var sources: [CFRunLoopSource] = []
+    private var contexts: [Context] = []
+
+    var isRunning: Bool { passiveTap != nil && activeTap != nil }
 
     private static let types: [CGEventType] = [
         .mouseMoved, .leftMouseDown, .leftMouseUp, .leftMouseDragged,
@@ -21,46 +34,58 @@ final class InputMonitor {
 
     @discardableResult
     func start() -> Bool {
-        guard tap == nil else { return true }
+        guard !isRunning else { return true }
         let mask = Self.types.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
-        let refcon = Unmanaged.passUnretained(self).toOpaque()
-        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
-                                          options: .defaultTap, eventsOfInterest: mask,
-                                          callback: inputTapCallback, userInfo: refcon) else {
+        func make(active: Bool) -> CFMachPort? {
+            let ctx = Context(self, active: active)
+            contexts.append(ctx)
+            return CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
+                                     options: active ? .defaultTap : .listenOnly, eventsOfInterest: mask,
+                                     callback: inputTapCallback, userInfo: Unmanaged.passUnretained(ctx).toOpaque())
+        }
+        guard let passive = make(active: false), let active = make(active: true) else {
+            contexts.removeAll()
             return false  // Accessibility / Input Monitoring not granted yet
         }
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-        self.tap = tap
-        self.source = source
+        for tap in [passive, active] {
+            let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)!
+            CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+            sources.append(source)
+        }
+        CGEvent.tapEnable(tap: passive, enable: true)
+        CGEvent.tapEnable(tap: active, enable: false)
+        passiveTap = passive
+        activeTap = active
         return true
     }
 
-    func stop() {
-        if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
-        if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
-        tap = nil
-        source = nil
+    /// Turn the swallowing tap on only while another Mac is being driven.
+    func setActive(_ on: Bool) {
+        if let activeTap { CGEvent.tapEnable(tap: activeTap, enable: on) }
     }
 
-    fileprivate func reenable() {
-        if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+    fileprivate func reenable(_ ctx: Context) {
+        if ctx.isActive { return }  // the active tap is re-enabled by the control state, not by the OS
+        if let passiveTap { CGEvent.tapEnable(tap: passiveTap, enable: true) }
     }
 }
 
 private func inputTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                               refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
     guard let refcon else { return Unmanaged.passUnretained(event) }
-    let monitor = Unmanaged<InputMonitor>.fromOpaque(refcon).takeUnretainedValue()
+    let ctx = Unmanaged<InputMonitor.Context>.fromOpaque(refcon).takeUnretainedValue()
+    let monitor = ctx.monitor
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-        monitor.reenable()
+        monitor.reenable(ctx)
         return Unmanaged.passUnretained(event)
     }
-    // Ignore events MacLinker itself injected.
+    // Ignore events we injected ourselves.
     if event.getIntegerValueField(.eventSourceUserData) == K.injectedMarker {
         return Unmanaged.passUnretained(event)
     }
-    let swallow = monitor.handler?(type, event) ?? false
-    return swallow ? nil : Unmanaged.passUnretained(event)
+    if ctx.isActive {
+        return (monitor.onActive?(type, event) ?? false) ? nil : Unmanaged.passUnretained(event)
+    }
+    monitor.onPassive?(type, event)
+    return Unmanaged.passUnretained(event)
 }

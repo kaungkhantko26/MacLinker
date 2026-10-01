@@ -18,4 +18,5 @@ struct Device: Identifiable, Equatable {
     var isTrusted: Bool
     var position: Edge?
     var latency: Double?
+    var link: String?
 }
