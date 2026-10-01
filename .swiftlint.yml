@@ -11,6 +11,9 @@ disabled_rules:
   - force_cast
   - nesting
   - trailing_comma
+  - statement_position
+  - type_name
+  - unneeded_synthesized_initializer
 opt_in_rules:
   - empty_count
   - closure_spacing
