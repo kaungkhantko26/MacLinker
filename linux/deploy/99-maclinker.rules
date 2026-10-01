@@ -1,3 +1,0 @@
-# Lets members of the "input" group (and the logged-in user) use /dev/uinput, which MacLinker needs to
-# inject keyboard and mouse events. Install to /etc/udev/rules.d/ and reload udev.
-KERNEL=="uinput", MODE="0660", GROUP="input", TAG+="uaccess", OPTIONS+="static_node=uinput"

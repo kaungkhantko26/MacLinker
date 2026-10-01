@@ -24,19 +24,6 @@ jobs:
           name: MacLinker-ci-build
           path: build/MacLinker.zip
 
-  linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install (hardware-free deps; evdev isn't needed by the tests)
-        run: pip install cryptography zeroconf pytest pytest-asyncio
-      - name: Test
-        working-directory: linux
-        run: python -m pytest -q
-
   lint:
     runs-on: macos-latest
     continue-on-error: true

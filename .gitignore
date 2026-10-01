@@ -10,8 +10,3 @@ Resources/AppIcon.icns
 *.key
 *.cer
 
-# Linux package
-linux/.venv/
-__pycache__/
-*.egg-info/
-.pytest_cache/
