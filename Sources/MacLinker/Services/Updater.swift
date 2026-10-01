@@ -68,24 +68,58 @@ final class Updater: ObservableObject {
         await MainActor.run { self.status = .ready(tag) }
     }
 
-    /// Replaces this app with the staged one after we quit, then relaunches.
+    /// Where the updated app should live. If this copy can't be replaced (macOS runs quarantined apps
+    /// from a read-only "translocated" path, or the folder isn't writable) install to Applications.
+    static func installDestination(current: URL = Bundle.main.bundleURL) -> URL {
+        let fm = FileManager.default
+        let translocated = current.path.contains("/AppTranslocation/")
+        if !translocated, fm.isWritableFile(atPath: current.deletingLastPathComponent().path) { return current }
+        let system = URL(fileURLWithPath: "/Applications")
+        if fm.isWritableFile(atPath: system.path) { return system.appendingPathComponent(current.lastPathComponent) }
+        let home = fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
+        try? fm.createDirectory(at: home, withIntermediateDirectories: true)
+        return home.appendingPathComponent(current.lastPathComponent)
+    }
+
+    static func installScript(pid: Int32, staged: String, dest: String) -> String {
+        """
+        #!/bin/bash
+        LOG="$HOME/Library/Logs/MacLinker-update.log"
+        mkdir -p "$HOME/Library/Logs"
+        exec >>"$LOG" 2>&1
+        STAGED="\(staged)"; DEST="\(dest)"
+        echo "--- $(date) updating to $DEST"
+        while kill -0 \(pid) 2>/dev/null; do sleep 0.2; done
+        [ -e "$DEST" ] && mv "$DEST" "$DEST.old"
+        if /usr/bin/ditto "$STAGED" "$DEST"; then
+            /usr/bin/xattr -dr com.apple.quarantine "$DEST"
+            rm -rf "$DEST.old" "$STAGED"
+            echo "installed"
+        else
+            echo "install failed, restoring"
+            rm -rf "$DEST"; [ -e "$DEST.old" ] && mv "$DEST.old" "$DEST"
+        fi
+        /usr/bin/open "$DEST"
+        """
+    }
+
+    /// Replaces the app with the staged one after we quit, then relaunches it.
     func installAndRelaunch() {
         guard let staged else { return }
-        let dest = Bundle.main.bundleURL.path
-        let script = """
-        #!/bin/bash
-        while kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do sleep 0.2; done
-        rm -rf "\(dest)" && mv "\(staged.path)" "\(dest)" && xattr -dr com.apple.quarantine "\(dest)"
-        open "\(dest)"
-        """
+        let dest = Self.installDestination().path
+        let script = Self.installScript(pid: ProcessInfo.processInfo.processIdentifier,
+                                        staged: staged.path, dest: dest)
         let path = FileManager.default.temporaryDirectory.appendingPathComponent("maclinker-install.sh")
         do {
             try script.write(to: path, atomically: true, encoding: .utf8)
             let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/bin/bash")
-            p.arguments = [path.path]
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/nohup")
+            p.arguments = ["/bin/bash", path.path]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
             try p.run()
-            NSApp.terminate(nil)
+            // Give the installer a moment to start waiting before we exit.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
         } catch {
             status = .failed("Couldn't start installer: \(error.localizedDescription)")
         }
