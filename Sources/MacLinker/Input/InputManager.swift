@@ -1,0 +1,241 @@
+import Foundation
+import AppKit
+import CoreGraphics
+
+/// Owns "who is driving": this Mac's own devices, or a peer's.
+///
+/// - `.controlling`: our pointer crossed a screen edge. Local events are swallowed and streamed to the peer.
+/// - `.controlled`: a peer is driving us. Its events are injected, and pushing against the
+///   edge we were entered from hands control back.
+final class InputManager: ObservableObject {
+    enum ControlState: Equatable {
+        case local
+        case controlling(peer: String, edge: Edge)
+        case controlled(peer: String, returnEdge: Edge)
+    }
+
+    @Published private(set) var state: ControlState = .local
+
+    /// Connected peers positioned relative to this Mac, keyed by the edge they sit on.
+    var edgePeers: [Edge: String] = [:]
+    var isEnabled: () -> Bool = { true }
+    var edgePush: () -> Double = { K.defaultEdgePush }
+    var send: ((String, MessageType, Data) -> Void)?
+
+    private let monitor = InputMonitor()
+    private let injector = InputInjector()
+    private var detector = ScreenEdgeDetector()
+    private var returnDetector = ScreenEdgeDetector()
+    private var virtualCursor = CGPoint.zero
+    private var cursorHidden = false
+    private var pendingMove = CGPoint.zero
+    private var flushTimer: DispatchSourceTimer?
+
+    init() {
+        monitor.handler = { [weak self] type, event in self?.handle(type, event) ?? false }
+    }
+
+    var isTapRunning: Bool { monitor.isRunning }
+    @discardableResult func startMonitoring() -> Bool { monitor.start() }
+
+    // MARK: Local events (controller side)
+
+    private func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
+        switch state {
+        case .controlled:
+            return false
+        case .local:
+            guard type == .mouseMoved || type == .leftMouseDragged || type == .rightMouseDragged
+                    || type == .otherMouseDragged, isEnabled(), !edgePeers.isEmpty else { return false }
+            let delta = CGPoint(x: event.getDoubleValueField(.mouseEventDeltaX),
+                                y: event.getDoubleValueField(.mouseEventDeltaY))
+            detector.threshold = edgePush()
+            if let hit = detector.update(location: event.location, delta: delta,
+                                         bounds: ScreenGeometry.bounds, edges: Set(edgePeers.keys)),
+               let peer = edgePeers[hit.edge], NSEvent.pressedMouseButtons == 0 {
+                beginControlling(peer: peer, edge: hit.edge, position: hit.position)
+            }
+            return false
+        case .controlling(let peer, _):
+            return forward(type, event, to: peer)
+        }
+    }
+
+    private func beginControlling(peer: String, edge: Edge, position: Float) {
+        state = .controlling(peer: peer, edge: edge)
+        CGAssociateMouseAndMouseCursorPosition(0)
+        if !cursorHidden { CGDisplayHideCursor(CGMainDisplayID()); cursorHidden = true }
+        send?(peer, .enterControl, ControlPayload(edge: edge, position: position).encode())
+        startFlushing(to: peer)
+    }
+
+    /// Mice report up to 1000 Hz. Sending each report separately floods the link and the
+    /// receiver, which is what makes the remote pointer lag. Batch movement at ~250 Hz instead.
+    private func startFlushing(to peer: String) {
+        pendingMove = .zero
+        let t = DispatchSource.makeTimerSource(queue: .main)
+        t.schedule(deadline: .now(), repeating: .milliseconds(3), leeway: .milliseconds(1))
+        t.setEventHandler { [weak self] in self?.flushMove(to: peer) }
+        t.resume()
+        flushTimer = t
+    }
+
+    private func flushMove(to peer: String) {
+        guard pendingMove != .zero else { return }
+        let p = MouseMovePayload(dx: Float(pendingMove.x), dy: Float(pendingMove.y))
+        pendingMove = .zero
+        send?(peer, .mouseMove, p.encode())
+    }
+
+    private func endControlling(warpTo position: Float?) {
+        guard case .controlling(_, let edge) = state else { return }
+        flushTimer?.cancel(); flushTimer = nil
+        pendingMove = .zero
+        if let position {
+            CGWarpMouseCursorPosition(edge.point(at: position, inset: 6, in: ScreenGeometry.bounds))
+        }
+        CGAssociateMouseAndMouseCursorPosition(1)
+        if cursorHidden { CGDisplayShowCursor(CGMainDisplayID()); cursorHidden = false }
+        detector.reset()
+        state = .local
+    }
+
+    /// Emergency exit: Control + Option + Command + Esc.
+    private func isEscapeChord(_ type: CGEventType, _ event: CGEvent) -> Bool {
+        guard type == .keyDown, event.getIntegerValueField(.keyboardEventKeycode) == 53 else { return false }
+        let need: CGEventFlags = [.maskControl, .maskAlternate, .maskCommand]
+        return event.flags.intersection(need) == need
+    }
+
+    private func forward(_ type: CGEventType, _ event: CGEvent, to peer: String) -> Bool {
+        if isEscapeChord(type, event) {
+            send?(peer, .releaseControl, ControlPayload(edge: .left, position: -1).encode())
+            endControlling(warpTo: nil)
+            return true
+        }
+        switch type {
+        case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged: break
+        default: flushMove(to: peer)  // keep movement ordered before clicks/keys
+        }
+        switch type {
+        case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+            pendingMove.x += event.getDoubleValueField(.mouseEventDeltaX)
+            pendingMove.y += event.getDoubleValueField(.mouseEventDeltaY)
+        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp:
+            let down = type == .leftMouseDown || type == .rightMouseDown || type == .otherMouseDown
+            let p = MouseButtonPayload(button: UInt8(clamping: event.getIntegerValueField(.mouseEventButtonNumber)),
+                                       down: down,
+                                       clickCount: UInt8(clamping: event.getIntegerValueField(.mouseEventClickState)))
+            send?(peer, .mouseButton, p.encode())
+        case .scrollWheel:
+            let continuous = event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
+            let dy = continuous ? event.getIntegerValueField(.scrollWheelEventPointDeltaAxis1)
+                                : event.getIntegerValueField(.scrollWheelEventDeltaAxis1)
+            let dx = continuous ? event.getIntegerValueField(.scrollWheelEventPointDeltaAxis2)
+                                : event.getIntegerValueField(.scrollWheelEventDeltaAxis2)
+            send?(peer, .scroll, ScrollPayload(dx: Int32(clamping: dx), dy: Int32(clamping: dy),
+                                               continuous: continuous).encode())
+        case .keyDown, .keyUp:
+            let p = KeyPayload(keyCode: UInt16(clamping: event.getIntegerValueField(.keyboardEventKeycode)),
+                               down: type == .keyDown, flags: event.flags.rawValue,
+                               autorepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0)
+            send?(peer, .keyEvent, p.encode())
+        case .flagsChanged:
+            let p = KeyPayload(keyCode: UInt16(clamping: event.getIntegerValueField(.keyboardEventKeycode)),
+                               down: true, flags: event.flags.rawValue, autorepeat: false)
+            send?(peer, .flagsChanged, p.encode())
+        default:
+            return false
+        }
+        return true
+    }
+
+    // MARK: Remote messages
+
+    func handle(message: MacLinkerMessage, from peer: String) {
+        do {
+            switch message.type {
+            case .enterControl:
+                guard isEnabled(), state == .local else {
+                    send?(peer, .releaseControl, ControlPayload(edge: .left, position: -1).encode())
+                    return
+                }
+                let p = try ControlPayload.decode(message.payload)
+                let returnEdge = p.edge.opposite
+                virtualCursor = returnEdge.point(at: p.position, inset: 2, in: ScreenGeometry.bounds)
+                returnDetector = ScreenEdgeDetector(threshold: edgePush())
+                state = .controlled(peer: peer, returnEdge: returnEdge)
+                injector.warp(to: virtualCursor)
+            case .releaseControl:
+                let p = try ControlPayload.decode(message.payload)
+                switch state {
+                case .controlling(let controlled, _) where controlled == peer:
+                    endControlling(warpTo: p.position >= 0 ? p.position : nil)
+                case .controlled(let controller, _) where controller == peer:
+                    endControlled()
+                default: break
+                }
+            case .mouseMove:
+                guard case .controlled(let controller, let returnEdge) = state, controller == peer else { return }
+                let p = try MouseMovePayload.decode(message.payload)
+                let delta = CGPoint(x: CGFloat(p.dx), y: CGFloat(p.dy))
+                let b = ScreenGeometry.bounds
+                virtualCursor = CGPoint(x: min(max(virtualCursor.x + delta.x, b.minX), b.maxX - 1),
+                                        y: min(max(virtualCursor.y + delta.y, b.minY), b.maxY - 1))
+                injector.move(to: virtualCursor, delta: delta)
+                if let hit = returnDetector.update(location: virtualCursor, delta: delta, bounds: b, edges: [returnEdge]) {
+                    send?(peer, .releaseControl, ControlPayload(edge: returnEdge, position: hit.position).encode())
+                    endControlled()
+                }
+            case .mouseButton:
+                guard isControlled(by: peer) else { return }
+                let p = try MouseButtonPayload.decode(message.payload)
+                injector.button(Int(p.button), down: p.down, clickCount: Int(p.clickCount), at: virtualCursor)
+            case .scroll:
+                guard isControlled(by: peer) else { return }
+                let p = try ScrollPayload.decode(message.payload)
+                injector.scroll(dx: p.dx, dy: p.dy, continuous: p.continuous)
+            case .keyEvent:
+                guard isControlled(by: peer) else { return }
+                let p = try KeyPayload.decode(message.payload)
+                injector.key(p.keyCode, down: p.down, flags: CGEventFlags(rawValue: p.flags), autorepeat: p.autorepeat)
+            case .flagsChanged:
+                guard isControlled(by: peer) else { return }
+                let p = try KeyPayload.decode(message.payload)
+                injector.flagsChanged(p.keyCode, flags: CGEventFlags(rawValue: p.flags))
+            default: break
+            }
+        } catch {
+            Log.error("bad input message: \(error)")
+        }
+    }
+
+    private func isControlled(by peer: String) -> Bool {
+        if case .controlled(let c, _) = state { return c == peer }
+        return false
+    }
+
+    private func endControlled() {
+        injector.releaseAll(at: virtualCursor)
+        returnDetector.reset()
+        state = .local
+    }
+
+    /// A peer vanished: never leave the pointer frozen or keys stuck.
+    func peerDisconnected(_ peer: String) {
+        switch state {
+        case .controlling(let p, _) where p == peer: endControlling(warpTo: 0.5)
+        case .controlled(let p, _) where p == peer: endControlled()
+        default: break
+        }
+    }
+
+    /// Sharing was switched off or the peer layout changed under us.
+    func abortIfNeeded() {
+        if case .controlling(let peer, _) = state, !isEnabled() {
+            send?(peer, .releaseControl, ControlPayload(edge: .left, position: -1).encode())
+            endControlling(warpTo: nil)
+        }
+        if case .controlled = state, !isEnabled() { endControlled() }
+    }
+}

@@ -1,0 +1,11 @@
+.build/
+build/
+.swiftpm/
+.DS_Store
+*.xcodeproj
+Resources/AppIcon.icns
+# never commit signing material or identity keys
+*.p12
+*.pem
+*.key
+*.cer

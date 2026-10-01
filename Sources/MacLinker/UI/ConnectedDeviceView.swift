@@ -1,0 +1,77 @@
+import SwiftUI
+import UniformTypeIdentifiers
+
+struct ConnectedDeviceView: View {
+    @EnvironmentObject var app: AppState
+    let device: Device
+    @State private var dropTargeted = false
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Circle().fill(.green).frame(width: 9, height: 9)
+                    VStack(alignment: .leading) {
+                        Text(device.name).font(.headline)
+                        Text(device.statusText).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Send File…") { app.pickAndSendFiles(to: device.id) }
+                    Button("Disconnect") { app.disconnect(device.id) }
+                }
+                HStack(alignment: .top, spacing: 24) {
+                    VStack(alignment: .leading) {
+                        Text("Where is \(device.name) relative to this Mac?").font(.caption).foregroundStyle(.secondary)
+                        PositionPicker(position: device.position) { app.setPosition($0, for: device.id) }
+                    }
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5]))
+                        .foregroundStyle(dropTargeted ? Color.accentColor : .secondary)
+                        .overlay(Text("Drop files here to send").font(.caption).foregroundStyle(.secondary))
+                        .frame(height: 90)
+                        .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+                            for p in providers {
+                                _ = p.loadObject(ofClass: URL.self) { url, _ in
+                                    if let url { DispatchQueue.main.async { app.sendFiles([url], to: device.id) } }
+                                }
+                            }
+                            return true
+                        }
+                }
+                if device.position == nil {
+                    Text("Pick a side to share one keyboard and mouse between the Macs.")
+                        .font(.caption).foregroundStyle(.orange)
+                } else {
+                    Text("Push the pointer against that screen edge to cross over. Emergency exit: ⌃⌥⌘⎋")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }.padding(6)
+        }
+    }
+}
+
+struct PositionPicker: View {
+    let position: Edge?
+    let onChange: (Edge?) -> Void
+
+    private func cell(_ edge: Edge) -> some View {
+        Button { onChange(position == edge ? nil : edge) } label: {
+            Text(edge.title).frame(width: 64, height: 26)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(position == edge ? .accentColor : .gray.opacity(0.4))
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            cell(.top)
+            HStack(spacing: 4) {
+                cell(.left)
+                Text("This Mac").font(.caption).frame(width: 64, height: 26)
+                    .background(RoundedRectangle(cornerRadius: 6).stroke(.secondary))
+                cell(.right)
+            }
+            cell(.bottom)
+        }
+    }
+}
