@@ -19,11 +19,14 @@ final class AppState: ObservableObject {
     let server = NetworkServer()
     let updater = Updater()
     let system = RemoteSystemManager()
+    let deviceInfo = DeviceInfoManager()
+    let shelf = ShelfStore()
     let discovery: DeviceDiscoveryManager
     let connections: ConnectionManager
     let reconnect: ReconnectManager
 
     @Published var lastError: String?
+    @Published private(set) var isRefreshing = false
     private var bag = Set<AnyCancellable>()
 
     init() {
@@ -52,7 +55,8 @@ final class AppState: ObservableObject {
             permissions.objectWillChange.eraseToAnyPublisher(), paths.objectWillChange.eraseToAnyPublisher(),
             pairing.objectWillChange.eraseToAnyPublisher(), input.objectWillChange.eraseToAnyPublisher(),
             files.objectWillChange.eraseToAnyPublisher(), discovery.objectWillChange.eraseToAnyPublisher(),
-            connections.objectWillChange.eraseToAnyPublisher(), updater.objectWillChange.eraseToAnyPublisher(), system.objectWillChange.eraseToAnyPublisher(),
+            connections.objectWillChange.eraseToAnyPublisher(), updater.objectWillChange.eraseToAnyPublisher(), system.objectWillChange.eraseToAnyPublisher(), deviceInfo.objectWillChange.eraseToAnyPublisher(),
+            shelf.objectWillChange.eraseToAnyPublisher(), clipboard.history.objectWillChange.eraseToAnyPublisher(),
         ].map { $0.map { _ in () }.eraseToAnyPublisher() }
         changes.forEach { $0.receive(on: DispatchQueue.main).sink { [weak self] in
             self?.objectWillChange.send()
@@ -72,6 +76,7 @@ final class AppState: ObservableObject {
             self?.input.peerDisconnected(id)
             self?.files.peerDisconnected()
             self?.system.peerDisconnected(id)
+            self?.deviceInfo.peerDisconnected(id)
         }
         pairing.onPresent = { WindowManager.shared.showPairing() }
 
@@ -85,6 +90,12 @@ final class AppState: ObservableObject {
             guard let v = self?.connections.peers[id]?.appVersion else { return false }
             return !Updater.isNewer(K.systemControlMinVersion, than: v)
         }
+        system.peerSupportsLock = { [weak self] id in self?.peerSupportsHub(id) ?? false }
+        system.lockAllowed = { [weak self] in self?.settings.allowRemoteLock ?? false }
+        deviceInfo.send = { [weak self] id, type, payload in self?.connections.send(type, payload: payload, to: id) }
+        deviceInfo.peerSupports = { [weak self] id in self?.peerSupportsHub(id) ?? false }
+        deviceInfo.connectedPeers = { [weak self] in self?.connections.connectedIDs ?? [] }
+        deviceInfo.link = { [weak self] in self?.paths.lanInterface }
         system.send = { [weak self] id, type, payload in self?.connections.send(type, payload: payload, to: id) }
 
         files.isEnabled = { [weak self] in self?.settings.fileSharing ?? false }
@@ -110,6 +121,7 @@ final class AppState: ObservableObject {
         reconnect.start()
         clipboard.start()
         updater.start()
+        deviceInfo.start()
         startInputIfPossible()
         Log.info("started as \(identity.deviceName) [\(identity.deviceID)]")
     }
@@ -134,10 +146,12 @@ final class AppState: ObservableObject {
         case .mouseMove, .mouseButton, .scroll, .keyEvent, .flagsChanged, .enterControl, .releaseControl:
             input.handle(message: msg, from: id)
         case .clipboard:
-            clipboard.receive(msg.payload)
+            clipboard.receive(msg.payload, from: connections.peers[id]?.name ?? trusted.device(id)?.name ?? "Another Mac")
         case .fileOffer, .fileChunk, .fileEnd, .fileAbort:
             files.handle(message: msg, from: id)
-        case .systemControl, .systemState, .systemQuery:
+        case .deviceInfo, .deviceInfoQuery:
+            deviceInfo.handle(msg, from: id)
+        case .lockScreen, .systemControl, .systemState, .systemQuery:
             system.handle(msg, from: id)
         case .layout:
             if let p = try? LayoutPayload.decode(msg.payload) { applyRemoteLayout(p, from: id) }
@@ -147,6 +161,7 @@ final class AppState: ObservableObject {
 
     private func peerConnected(_ id: String) {
         reconnect.reset(id)
+        deviceInfo.peerConnected(id)
         system.announce(to: id)
         system.refresh(id)
         if let pos = trusted.device(id)?.position {
@@ -201,6 +216,34 @@ final class AppState: ObservableObject {
     private func connect(address ep: NWEndpoint) {
         let pin = settings.pinToLAN && (ep.hostString.map(NetworkPathWatcher.isLANHost) ?? false)
         connections.connect(to: ep, expectedID: nil, interface: pin ? paths.lanInterface : nil)
+    }
+
+    func peerSupportsHub(_ id: String) -> Bool {
+        guard let v = connections.peers[id]?.appVersion else { return false }
+        return !Updater.isNewer(K.hubMinVersion, than: v)
+    }
+
+    /// The Refresh button: browse again, retry offline Macs now, and re-read this Mac and every peer's info.
+    func refresh() {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        discovery.restart()
+        reconnect.retryNow()
+        permissions.refresh()
+        deviceInfo.refreshAll()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.isRefreshing = false }
+    }
+
+    func lock(_ id: String) { system.lock(id) }
+
+    func sendClipboard(to id: String) {
+        guard let payload = clipboard.payloadForSendNow() else { return }
+        connections.send(.clipboard, payload: payload, to: id)
+    }
+
+    func send(_ entry: ClipboardEntry, to id: String) {
+        guard let message = entry.message, let payload = try? JSONEncoder().encode(message) else { return }
+        connections.send(.clipboard, payload: payload, to: id)
     }
 
     func disconnect(_ id: String) { connections.disconnect(id) }

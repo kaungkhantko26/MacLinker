@@ -284,3 +284,134 @@ final class CompatibilityTests: XCTestCase {
         }
     }
 }
+
+final class DeviceInfoTests: XCTestCase {
+    func testClassifiesKeyboardsAndMiceFromRegistryDictionaries() throws {
+        let kb = try XCTUnwrap(DeviceInfoProvider.classify([
+            "Product": "Magic Keyboard", "Transport": "Bluetooth", "BatteryPercent": 82,
+            "DeviceUsagePairs": [["DeviceUsagePage": 1, "DeviceUsage": 6]]]))
+        XCTAssertTrue(kb.isKeyboard); XCTAssertFalse(kb.isPointer)
+        XCTAssertEqual(kb.peripheral.transport, "Bluetooth"); XCTAssertEqual(kb.peripheral.battery, 82)
+        let mouse = try XCTUnwrap(DeviceInfoProvider.classify([
+            "Product": "MX Master 3", "Transport": "USB", "PrimaryUsagePage": 1, "PrimaryUsage": 2]))
+        XCTAssertTrue(mouse.isPointer); XCTAssertFalse(mouse.isKeyboard)
+        let pad = try XCTUnwrap(DeviceInfoProvider.classify([
+            "Product": "Apple Internal Keyboard / Trackpad", "Transport": "SPI",
+            "DeviceUsagePairs": [["DeviceUsagePage": 1, "DeviceUsage": 6], ["DeviceUsagePage": 13, "DeviceUsage": 5]]]))
+        XCTAssertTrue(pad.isKeyboard && pad.isPointer); XCTAssertEqual(pad.peripheral.transport, "Built-in")
+        // virtual, nameless and unrelated devices are ignored; absurd battery values are dropped
+        XCTAssertNil(DeviceInfoProvider.classify(["Product": "Karabiner VirtualHIDKeyboard", "Transport": "Virtual",
+                                                  "PrimaryUsagePage": 1, "PrimaryUsage": 6]))
+        XCTAssertNil(DeviceInfoProvider.classify(["Transport": "USB", "PrimaryUsagePage": 1, "PrimaryUsage": 6]))
+        XCTAssertNil(DeviceInfoProvider.classify(["Product": "Game Pad", "Transport": "USB", "PrimaryUsagePage": 1, "PrimaryUsage": 5]))
+        let odd = try XCTUnwrap(DeviceInfoProvider.classify(["Product": "K", "PrimaryUsagePage": 1, "PrimaryUsage": 6, "BatteryPercent": 4000]))
+        XCTAssertNil(odd.peripheral.battery)
+        // battery matched by Bluetooth address (how Apple devices report it); a keyboard's extra mouse interface isn't a pointer
+        let apple = try XCTUnwrap(DeviceInfoProvider.classify(
+            ["Product": "Magic Mouse", "Transport": "Bluetooth", "DeviceAddress": "00:81:2A:95:8A:AD", "PrimaryUsagePage": 1, "PrimaryUsage": 2],
+            batteries: ["00-81-2a-95-8a-ad": 95]))
+        XCTAssertEqual(apple.peripheral.battery, 95)
+        let byModel = try XCTUnwrap(DeviceInfoProvider.classify(
+            ["Product": "Magic Mouse", "Transport": "Bluetooth", "VendorID": 76, "ProductID": 617, "PrimaryUsagePage": 1, "PrimaryUsage": 2],
+            batteries: ["76:617": 80]))
+        XCTAssertEqual(byModel.peripheral.battery, 80)
+        let aula = try XCTUnwrap(DeviceInfoProvider.classify(
+            ["Product": "AULA-F75 5.0 KB", "Transport": "Bluetooth",
+             "DeviceUsagePairs": [["DeviceUsagePage": 1, "DeviceUsage": 6], ["DeviceUsagePage": 1, "DeviceUsage": 2]]]))
+        XCTAssertTrue(aula.isKeyboard); XCTAssertFalse(aula.isPointer)
+    }
+
+    func testPayloadRoundTripsAsJSON() throws {
+        let info = DeviceInfoPayload(kind: "laptop", model: "Mac14,2", osVersion: "macOS 15.1",
+                                     keyboards: [.init(name: "K", transport: "Bluetooth", battery: 50)], pointers: [],
+                                     audioOutput: "Speakers", network: "Wi-Fi")
+        XCTAssertEqual(try JSONDecoder().decode(DeviceInfoPayload.self, from: JSONEncoder().encode(info)), info)
+    }
+
+    /// Read-only: prints what this Mac reports, so the real detection can be eyeballed.
+    func testReadsThisMacWithoutCrashing() {
+        let info = DeviceInfoProvider.snapshot(link: nil)
+        print("DEVICEINFO kind=\(info.kind) model=\(info.model) os=\(info.osVersion) audio=\(info.audioOutput ?? "-")")
+        for k in info.keyboards { print("DEVICEINFO keyboard: \(k.name) [\(k.transport)] battery=\(k.battery.map(String.init) ?? "-")") }
+        for p in info.pointers { print("DEVICEINFO pointer: \(p.name) [\(p.transport)] battery=\(p.battery.map(String.init) ?? "-")") }
+        XCTAssertFalse(info.model.isEmpty)
+    }
+}
+
+final class HubLogicTests: XCTestCase {
+    func testClipboardHistoryDedupesLimitsAndSkipsEmpty() {
+        let h = ClipboardHistory()
+        func text(_ s: String) -> ClipboardMessage { ClipboardMessage(entries: [.init(type: "public.utf8-plain-text", data: Data(s.utf8))]) }
+        h.add(text("hello"), source: "This Mac")
+        h.add(text("hello"), source: "Mini")           // same item echoing back: not listed twice
+        XCTAssertEqual(h.entries.count, 1)
+        h.add(text("   "), source: "x")                  // whitespace only: ignored
+        XCTAssertEqual(h.entries.count, 1)
+        for i in 0..<40 { h.add(text("item \(i)"), source: "x") }
+        XCTAssertEqual(h.entries.count, ClipboardHistory.limit)
+        XCTAssertEqual(h.entries.first?.preview, "item 39")   // newest first
+        let big = ClipboardMessage(entries: [.init(type: "public.png", data: Data(count: ClipboardHistory.keepLimit + 1))])
+        h.add(big, source: "x")
+        XCTAssertNil(h.entries.first?.message, "oversized items are listed but not kept in memory")
+        XCTAssertEqual(h.entries.first?.kind, .image)
+        h.clear()
+        XCTAssertTrue(h.entries.isEmpty)
+    }
+
+    func testShelfPersistsAndDropsMissingFiles() throws {
+        let suite = UserDefaults(suiteName: "maclinker-test-\(UUID().uuidString)")!
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let a = dir.appendingPathComponent("a.txt"), b = dir.appendingPathComponent("b.txt")
+        try "a".write(to: a, atomically: true, encoding: .utf8); try "b".write(to: b, atomically: true, encoding: .utf8)
+        let shelf = ShelfStore(defaults: suite)
+        shelf.add([a, b, a, dir])                         // duplicate and a folder are ignored
+        XCTAssertEqual(shelf.items.map(\.name), ["a.txt", "b.txt"])
+        try FileManager.default.removeItem(at: b)
+        let reloaded = ShelfStore(defaults: suite)        // next launch: the deleted file is gone from the shelf
+        XCTAssertEqual(reloaded.items.map(\.name), ["a.txt"])
+        reloaded.remove(try XCTUnwrap(reloaded.items.first))
+        XCTAssertTrue(ShelfStore(defaults: suite).items.isEmpty)
+    }
+
+    func testGreetingByHour() {
+        func at(_ hour: Int) -> String {
+            greeting(for: Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: Date())!)
+        }
+        XCTAssertEqual(at(8), "Good morning"); XCTAssertEqual(at(14), "Good afternoon")
+        XCTAssertEqual(at(20), "Good evening"); XCTAssertEqual(at(2), "Good evening")
+    }
+
+    func testCardRowsListBuiltInTrackpadOnceAndShowBatteries() {
+        let info = DeviceInfoPayload(kind: "laptop", model: "x", osVersion: "", 
+                                     keyboards: [.init(name: "Apple Internal Keyboard / Trackpad", transport: "Built-in", battery: nil)],
+                                     pointers: [.init(name: "Apple Internal Keyboard / Trackpad", transport: "Built-in", battery: nil),
+                                                .init(name: "MX Master", transport: "Bluetooth", battery: 64)],
+                                     audioOutput: "Speakers", network: "USB-C cable")
+        let rows = DeviceCardModel.rows(for: info).map(\.text)
+        XCTAssertEqual(rows, ["USB-C cable", "Speakers", "Apple Internal Keyboard / Trackpad", "MX Master · Bluetooth · 64%"])
+        XCTAssertEqual(DeviceCardModel.symbol(for: info), "laptopcomputer")
+        XCTAssertEqual(DeviceCardModel.subtitle(for: info), "MacBook")
+        XCTAssertTrue(DeviceCardModel.rows(for: nil).isEmpty, "no info yet: no rows")
+    }
+
+    func testPeerInfoIsSanitisedBeforeBeingShown() {
+        let nasty = DeviceInfoPayload(kind: "toaster", model: String(repeating: "m", count: 500), osVersion: "ok\u{0007}\u{202E}x",
+                                      keyboards: (0..<30).map { .init(name: "K\($0)\n", transport: "USB", battery: 900) }, pointers: [],
+                                      audioOutput: "Spk\u{0000}", network: nil)
+        let clean = DeviceInfoManager.sanitized(nasty)
+        XCTAssertEqual(clean.kind, "desktop")
+        XCTAssertEqual(clean.model.count, 40)
+        XCTAssertFalse(clean.osVersion.unicodeScalars.contains { $0.value == 7 || $0.value == 0x202E })
+        XCTAssertEqual(clean.keyboards.count, 8)
+        XCTAssertNil(clean.keyboards[0].battery)
+        XCTAssertEqual(clean.keyboards[0].name, "K0")
+        XCTAssertEqual(clean.audioOutput, "Spk")
+    }
+
+    func testHubMessagesNeedANewEnoughPeer() {
+        func supports(_ v: String) -> Bool { !Updater.isNewer(K.hubMinVersion, than: v) }
+        XCTAssertFalse(supports("1.4.1")); XCTAssertTrue(supports("1.5.0"))
+        XCTAssertEqual(MessageType.lockScreen.rawValue, 53); XCTAssertEqual(MessageType.deviceInfo.rawValue, 80)
+    }
+}

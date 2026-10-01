@@ -26,6 +26,10 @@ enum MessageType: UInt8 {
     case systemControl = 50
     case systemState = 51
     case systemQuery = 52
+    case lockScreen = 53
+
+    case deviceInfo = 80
+    case deviceInfoQuery = 81
 
     /// Messages that may flow before the peer is paired/trusted.
     var isHandshakePhase: Bool {
@@ -215,4 +219,25 @@ struct SystemStatePayload: BinaryPayload, Equatable {
         return Self(hasBrightness: try r.bool(), hasVolume: try r.bool(), brightness: try r.f32(),
                     volume: try r.f32(), muted: try r.bool())
     }
+}
+
+/// What a Mac tells its peers about itself: shown on the Home cards.
+struct DeviceInfoPayload: Codable, Equatable {
+    struct Peripheral: Codable, Equatable {
+        var name: String
+        /// "Bluetooth", "USB", "Built-in", ...
+        var transport: String
+        /// 0...100 when the device reports it.
+        var battery: Int?
+    }
+    var kind: String          // "laptop" or "desktop"
+    var model: String         // hardware model identifier
+    var osVersion: String
+    var keyboards: [Peripheral]
+    var pointers: [Peripheral]
+    var audioOutput: String?
+    var network: String?      // "Wi-Fi", "Ethernet", "USB-C cable", ...
+
+    static let empty = DeviceInfoPayload(kind: "desktop", model: "", osVersion: "", keyboards: [], pointers: [],
+                                         audioOutput: nil, network: nil)
 }

@@ -10,6 +10,7 @@ struct SettingsView: View {
                 Toggle("Share clipboard (text, links, images)", isOn: $app.settings.clipboardSharing)
                 Toggle("Accept files into Downloads/MacLinker", isOn: $app.settings.fileSharing)
                 Toggle("Let paired Macs adjust this Mac's brightness and volume", isOn: $app.settings.remoteSystemControl)
+                Toggle("Let paired Macs lock this Mac's screen", isOn: $app.settings.allowRemoteLock)
                 Toggle("Open at login", isOn: $app.settings.launchAtLogin)
                 HStack {
                     Text("Pointer hiding while controlling another Mac")

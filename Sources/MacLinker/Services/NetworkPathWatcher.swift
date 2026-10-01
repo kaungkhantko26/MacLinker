@@ -49,6 +49,24 @@ final class NetworkPathWatcher: ObservableObject {
         }
     }
 
+    /// This Mac's IPv4 addresses per interface, for the Network page.
+    static func localAddresses() -> [(interface: String, address: String)] {
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0, let first = head else { return [] }
+        defer { freeifaddrs(head) }
+        var out: [(String, String)] = []
+        for ptr in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let ifa = ptr.pointee
+            guard let addr = ifa.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET), (ifa.ifa_flags & UInt32(IFF_UP)) != 0,
+                  (ifa.ifa_flags & UInt32(IFF_LOOPBACK)) == 0 else { continue }
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            if getnameinfo(addr, socklen_t(addr.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 {
+                out.append((String(cString: ifa.ifa_name), String(cString: host)))
+            }
+        }
+        return out
+    }
+
     /// `utunN` interfaces that carry an IPv4 address. macOS keeps several utun devices around for
     /// system services, but those only have IPv6 link-local addresses; a VPN client adds IPv4.
     static func activeTunnelInterfaces() -> [String] {

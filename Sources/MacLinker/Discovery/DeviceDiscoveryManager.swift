@@ -12,5 +12,12 @@ final class DeviceDiscoveryManager: ObservableObject {
     }
 
     func start() { browser.start() }
+
+    /// Throws away what was found and browses again (the Refresh button).
+    func restart() {
+        browser.stop()
+        discovered = [:]
+        browser.start()
+    }
     func stop() { browser.stop() }
 }

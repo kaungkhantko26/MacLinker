@@ -27,6 +27,23 @@ final class SystemController {
                                   muted: isMuted() ?? false)
     }
 
+    // MARK: Lock
+
+    /// Locks the screen. Uses the login framework's lock call (private, loaded at runtime); if that's unavailable the
+    /// displays are put to sleep instead, which locks the Mac when it asks for a password on wake.
+    @discardableResult
+    func lockScreen() -> Bool {
+        typealias LockFn = @convention(c) () -> Int32
+        if let handle = dlopen("/System/Library/PrivateFrameworks/login.framework/login", RTLD_LAZY),
+           let symbol = dlsym(handle, "SACLockScreenImmediate") {
+            return unsafeBitCast(symbol, to: LockFn.self)() == 0
+        }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+        p.arguments = ["displaysleepnow"]
+        return (try? p.run()) != nil
+    }
+
     // MARK: Volume (CoreAudio)
 
     private func outputDevice() -> AudioDeviceID? {

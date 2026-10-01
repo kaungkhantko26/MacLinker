@@ -37,6 +37,14 @@ final class ReconnectManager {
         offlineSince[id] = nil
     }
 
+    /// Forget back-off timers and try every offline trusted Mac now.
+    func retryNow() {
+        nextAttempt = [:]
+        failures = [:]
+        for key in Array(offlineSince.keys) { offlineSince[key] = .distantPast }
+        tick()
+    }
+
     private func tick() {
         let now = Date()
         for device in trusted.devices {

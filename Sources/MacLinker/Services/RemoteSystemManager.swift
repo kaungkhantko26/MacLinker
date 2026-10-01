@@ -6,6 +6,9 @@ final class RemoteSystemManager: ObservableObject {
     @Published private(set) var states: [String: SystemStatePayload] = [:]
 
     var isAllowed: () -> Bool = { true }
+    var lockAllowed: () -> Bool = { true }
+    /// Lock messages need MacLinker 1.5.0+, newer than the brightness/volume check above.
+    var peerSupportsLock: (String) -> Bool = { _ in false }
     var send: ((String, MessageType, Data) -> Void)?
     /// Whether the peer is new enough to understand brightness/volume messages.
     var peerSupports: (String) -> Bool = { _ in false }
@@ -39,6 +42,9 @@ final class RemoteSystemManager: ObservableObject {
             announce(to: peer)  // (already gated on the peer's version)
         case .systemState:
             if let s = try? SystemStatePayload.decode(message.payload) { states[peer] = s }
+        case .lockScreen:
+            guard lockAllowed() else { return }
+            queue.async { _ = self.controller.lockScreen() }
         case .systemControl:
             guard isAllowed(), let req = try? SystemControlPayload.decode(message.payload) else { return }
             queue.async {
@@ -54,6 +60,11 @@ final class RemoteSystemManager: ObservableObject {
     }
 
     // MARK: Controlling a peer
+
+    func lock(_ peer: String) {
+        guard peerSupportsLock(peer) else { return }
+        send?(peer, .lockScreen, Data())
+    }
 
     func refresh(_ peer: String) {
         guard peerSupports(peer) else { return }

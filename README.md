@@ -32,6 +32,8 @@ MacLinker swaps that stack for something simple and visible: **plain encrypted T
 
 ## Features
 
+- **A hub window**: Home shows each Mac as a card with its link, audio output, and the keyboards and mice attached (with battery levels), plus one-click Send File, Send Clipboard and Lock; a Refresh button rescans for devices
+- **Drop Shelf** (park files, send later) and **clipboard history** (this Mac and your others, kept in memory only)
 - **Edge-crossing control**: push the pointer against a screen edge to move to the other Mac, with the keyboard following
 - **Clipboard sync** for text, links and images (password-manager items are never sent)
 - **File transfer**, including drag and drop onto the connected Mac
