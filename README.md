@@ -40,6 +40,7 @@ MacLinker swaps that stack for something simple and visible: **plain encrypted T
 - **Works with VPNs**: Mac-to-Mac traffic is pinned to the physical interface so it never enters a tunnel
 - **Automatic discovery and reconnect**, or add a Mac by IP or `name.local`
 - **Secure by default**: end-to-end encrypted, mutually authenticated, pairing confirmed by a code on both screens
+- **Linux too**: pair a Linux machine (X11 or Wayland) with a Mac, in both directions. See [linux/](linux/README.md)
 - **Self-updating** from signed GitHub releases; menu-bar app plus a normal window
 
 ## Install
@@ -111,6 +112,7 @@ Input capture, batching and injection run on a dedicated high-priority thread, s
 - [ ] Remote display resolution and refresh rate
 - [ ] Remote sleep, lock and wake
 - [ ] Notarized builds
+- [ ] Linux: real-hardware testing on more desktops, remote brightness/volume, VPN pinning
 - [ ] Media-key forwarding and folder transfer
 
 Ideas welcome: open an [issue](https://github.com/kaungkhantko26/MacLinker/issues/new/choose).
