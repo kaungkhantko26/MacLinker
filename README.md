@@ -102,6 +102,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). CI builds a universal binary and runs th
 
 Early software. Not supported: media keys, folder transfer. Bug reports and pull requests are welcome.
 
+## Author
+
+Built by **Kaung Khant Ko** ([@kaungkhantko26](https://github.com/kaungkhantko26)).
+
 ## License
 
-MIT
+MIT, copyright Kaung Khant Ko and MacLinker contributors.

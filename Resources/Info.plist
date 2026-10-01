@@ -10,6 +10,7 @@
     <key>CFBundleShortVersionString</key><string>__VERSION__</string>
     <key>MacLinkerUpdateRepo</key><string>__REPO__</string>
     <key>CFBundleVersion</key><string>1</string>
+    <key>NSHumanReadableCopyright</key><string>Built by Kaung Khant Ko. MIT License.</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><false/>
     <key>CFBundleIconFile</key><string>AppIcon</string>

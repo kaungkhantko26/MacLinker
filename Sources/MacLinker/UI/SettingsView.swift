@@ -62,6 +62,11 @@ struct SettingsView: View {
                 }
             }
 
+            Section("About") {
+                LabeledContent("MacLinker", value: "Built by Kaung Khant Ko")
+                Link("github.com/kaungkhantko26/MacLinker", destination: URL(string: "https://github.com/kaungkhantko26/MacLinker")!)
+            }
+
             Section("This Mac") {
                 LabeledContent("Name", value: app.identity.deviceName)
                 LabeledContent("Device ID", value: app.identity.deviceID).textSelection(.enabled)
