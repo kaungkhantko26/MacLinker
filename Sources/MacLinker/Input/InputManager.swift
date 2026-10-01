@@ -63,6 +63,23 @@ final class InputManager: ObservableObject {
         }
     }
 
+    /// Cursor visibility must be changed from the main thread, and only after the connection has been
+    /// allowed to set it from the background. Calls are issued in order, and balanced (hide/show counts stack).
+    private func setCursorHidden(_ hidden: Bool) {
+        guard hidden != cursorHidden else { return }
+        cursorHidden = hidden
+        DispatchQueue.main.async {
+            _ = allowBackgroundCursor
+            if hidden {
+                CGDisplayHideCursor(CGMainDisplayID())
+                NSCursor.hide()
+            } else {
+                CGDisplayShowCursor(CGMainDisplayID())
+                NSCursor.unhide()
+            }
+        }
+    }
+
     private func setState(_ new: ControlState) {
         controlState = new
         DispatchQueue.main.async { self.state = new }
@@ -95,11 +112,7 @@ final class InputManager: ObservableObject {
         setState(.controlling(peer: peer, edge: edge))
         monitor.setActive(true)
         CGAssociateMouseAndMouseCursorPosition(0)
-        if !cursorHidden {
-            _ = allowBackgroundCursor
-            CGDisplayHideCursor(CGMainDisplayID())
-            cursorHidden = true
-        }
+        setCursorHidden(true)
         send?(peer, .enterControl, ControlPayload(edge: edge, position: position).encode())
         startFlushing(to: peer)
     }
@@ -132,7 +145,7 @@ final class InputManager: ObservableObject {
             CGWarpMouseCursorPosition(edge.point(at: position, inset: 6, in: ScreenGeometry.bounds))
         }
         CGAssociateMouseAndMouseCursorPosition(1)
-        if cursorHidden { CGDisplayShowCursor(CGMainDisplayID()); cursorHidden = false }
+        setCursorHidden(false)
         detector.reset()
         setState(.local)
     }
