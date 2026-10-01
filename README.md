@@ -28,7 +28,6 @@ MacLinker swaps that stack for something simple and visible: **plain encrypted T
 | Works next to a VPN (e.g. Outline) | Often breaks | **Yes: traffic stays on the local link** |
 | Shows what's wrong | No | **Link in use, latency, connection state** |
 | Remote brightness / volume of the other Mac | No | **Yes** |
-| Use another Mac as an extra monitor | Sidecar (iPad only) | **Yes, Mac to Mac** |
 | Open source | No | **Yes (MIT)** |
 
 ## Features
@@ -37,7 +36,6 @@ MacLinker swaps that stack for something simple and visible: **plain encrypted T
 - **Clipboard sync** for text, links and images (password-manager items are never sent)
 - **File transfer**, including drag and drop onto the connected Mac
 - **Remote brightness and volume** sliders for the other Mac (built-in displays, and DDC-capable external monitors on Apple Silicon)
-- **Use a Mac as a second display**: your desktop extends onto the other Mac, with its mouse and keyboard working on it
 - **Fast on a cable**: prefers a USB-C/Thunderbolt or Ethernet link over Wi-Fi, and shows the link and latency live
 - **Works with VPNs**: Mac-to-Mac traffic is pinned to the physical interface so it never enters a tunnel
 - **Automatic discovery and reconnect**, or add a Mac by IP or `name.local`
@@ -67,22 +65,6 @@ Then, on each Mac:
 Emergency exit while controlling the other Mac: **Control + Option + Command + Esc**.
 
 Updates install themselves: Settings > Updates > Check Now, then Restart & Update.
-
-## Use a Mac as a second display
-
-Extend one Mac's desktop onto the other Mac's screen, like an external monitor:
-
-1. On the Mac whose desktop you want to extend (the **host**), open MacLinker, find the other Mac under Devices, and click **Start** next to "Use … as a second display".
-2. The other Mac (the **viewer**) asks you to allow it. Click **Allow**. Its screen then shows a new display from the host.
-3. Drag windows onto the new display, or arrange it under System Settings > Displays on the host (**Arrange Displays…** opens it). The pointer moves onto it like any monitor, and the viewer's own mouse and keyboard work on it too.
-4. Stop with **Stop** on the host, or press **Control+Option+Command+Esc** on the viewer.
-
-Requirements and limits:
-
-- Both Macs need MacLinker 1.4.0 or newer, and the host needs the **Screen Recording** permission (Settings shows it, and macOS asks the first time).
-- It uses a private macOS interface to create the virtual display (the same one DeskPad and BetterDisplay use), so a future macOS update could break it. If macOS refuses, MacLinker tells you instead of failing silently.
-- It's a video stream (H.264 over your encrypted link), so expect a small delay: fine for documents, chat and reference windows, and not a replacement for a real monitor for fast video or games. A USB-C cable or 5 GHz Wi-Fi gives the best result. **Settings > Second display** has a Balanced (smoother) and a Sharp (full Retina) option.
-- No audio. Only one display share at a time.
 
 ## For the lowest latency
 
@@ -126,7 +108,6 @@ Input capture, batching and injection run on a dedicated high-priority thread, s
 ## Roadmap
 
 - [ ] Display layout matching for multi-monitor setups
-- [ ] Second display: audio, and sharing to more than one Mac
 - [ ] Remote display resolution and refresh rate
 - [ ] Remote sleep, lock and wake
 - [ ] Notarized builds

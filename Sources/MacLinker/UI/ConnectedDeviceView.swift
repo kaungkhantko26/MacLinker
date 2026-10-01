@@ -39,7 +39,6 @@ struct ConnectedDeviceView: View {
                         }
                 }
                 RemoteControlsView(device: device)
-                DisplayShareRow(device: device)
                 if device.position == nil {
                     Text("Pick a side to share one keyboard and mouse between the Macs.")
                         .font(.caption).foregroundStyle(.orange)
@@ -111,56 +110,5 @@ struct RemoteControlsView: View {
                 }
             }
         }
-    }
-}
-
-/// Use the other Mac as a second display for this one.
-struct DisplayShareRow: View {
-    @EnvironmentObject var app: AppState
-    let device: Device
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            switch app.display.state {
-            case .offering(let p) where p == device.id:
-                row("Waiting for \(device.name) to accept…", button: "Cancel") { app.display.stop() }
-            case .starting(let p) where p == device.id:
-                row("Starting the display…", button: "Cancel") { app.display.stop() }
-            case .hosting(let p) where p == device.id:
-                row("\(device.name) is now a second display for this Mac.", button: "Stop") { app.display.stop() }
-                Text("Drag windows onto it, or arrange it in System Settings > Displays. Stop with Control+Option+Command+Esc on \(device.name).")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button("Arrange Displays…") { openDisplaySettings() }.buttonStyle(.link).font(.caption)
-            case .asking(let p) where p == device.id, .viewing(let p) where p == device.id:
-                Text("This Mac is showing \(device.name)'s desktop.").font(.callout)
-            case .failed(let reason):
-                row(reason, button: "Dismiss") { app.display.clearFailure() }.foregroundStyle(.red)
-            default:
-                HStack {
-                    Image(systemName: "display.2").frame(width: 20)
-                    Text("Use \(device.name) as a second display").font(.callout)
-                    Spacer()
-                    Button("Start") { app.display.startHosting(to: device.id) }
-                        .disabled(app.display.isBusy || !app.supportsDisplay(device.id))
-                }
-                if !app.supportsDisplay(device.id) {
-                    Text("\(device.name) needs MacLinker \(K.displayMinVersion) or newer for this.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private func row(_ text: String, button: String, action: @escaping () -> Void) -> some View {
-        HStack {
-            Image(systemName: "display.2").frame(width: 20)
-            Text(text).font(.callout)
-            Spacer()
-            Button(button, action: action)
-        }
-    }
-
-    private func openDisplaySettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.Displays-Settings.extension") { NSWorkspace.shared.open(url) }
     }
 }

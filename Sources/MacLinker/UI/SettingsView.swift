@@ -23,15 +23,6 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Second display") {
-                Toggle("Don't ask when a paired Mac wants to use this screen as its display", isOn: $app.settings.displayAutoAccept)
-                Picker("Quality when sharing this Mac's desktop", selection: $app.settings.displayQuality) {
-                    ForEach(DisplaySharingManager.Quality.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
-                }
-                Text("Balanced uses less bandwidth; Sharp is a full Retina picture and works best over a cable or good 5 GHz Wi-Fi. This Mac needs the Screen Recording permission below to share its desktop.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
             Section("Network") {
                 Toggle("Keep Mac-to-Mac traffic on the local network (bypass VPN)", isOn: $app.settings.pinToLAN)
                 LabeledContent("Local interface", value: app.paths.lanInterface?.name ?? "none")
@@ -45,8 +36,6 @@ struct SettingsView: View {
             Section("Permissions") {
                 permissionRow("Accessibility", granted: app.permissions.accessibility,
                               request: app.permissions.requestAccessibility, pane: "Privacy_Accessibility")
-                permissionRow("Screen Recording (to share this Mac's desktop as a display)", granted: app.permissions.screenRecording,
-                              request: app.permissions.requestScreenRecording, pane: "Privacy_ScreenCapture")
                 permissionRow("Input Monitoring", granted: app.permissions.inputMonitoring,
                               request: app.permissions.requestInputMonitoring, pane: "Privacy_ListenEvent")
             }

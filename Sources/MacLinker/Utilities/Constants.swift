@@ -5,8 +5,6 @@ enum K {
     static var appVersion: String { (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0" }
     /// First version that understands the brightness/volume messages. Older peers must never be sent them.
     static let systemControlMinVersion = "1.2.0"
-    /// First version that understands the second-display messages.
-    static let displayMinVersion = "1.4.0"
     static let bundleID = "com.maclinker.app"
     static let serviceType = "_maclinker._tcp"
     static let defaultPort: UInt16 = 52845
