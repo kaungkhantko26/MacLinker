@@ -69,14 +69,8 @@ final class InputManager: ObservableObject {
         guard hidden != cursorHidden else { return }
         cursorHidden = hidden
         DispatchQueue.main.async {
-            _ = allowBackgroundCursor
-            if hidden {
-                CGDisplayHideCursor(CGMainDisplayID())
-                NSCursor.hide()
-            } else {
-                CGDisplayShowCursor(CGMainDisplayID())
-                NSCursor.unhide()
-            }
+            _ = allowBackgroundCursor  // best effort; CursorHider does the reliable part
+            if hidden { CursorHider.hide() } else { CursorHider.show() }
         }
     }
 
