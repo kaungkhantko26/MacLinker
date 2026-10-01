@@ -6,6 +6,8 @@ struct HomeModel: Equatable {
     var thisDevice: DeviceCardModel
     var others: [DeviceCardModel]
     var targets: [DeviceActionButton.Target]   // connected Macs
+    /// Shown at the top when something is stopping keyboard sharing.
+    var warning: String?
 }
 
 struct HomeActions {
@@ -43,6 +45,15 @@ struct HomeContent: View {
             VStack(alignment: .leading, spacing: 22) {
                 PageHeader(title: model.greeting, subtitle: model.subtitle) {
                     RefreshButton(isRefreshing: isRefreshing, action: actions.refresh)
+                }
+                if let warning = model.warning {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        Text(warning).font(.callout)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(14)
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.orange.opacity(0.14)))
                 }
 
                 Text("Your Devices").font(.headline)
@@ -131,6 +142,7 @@ extension AppState {
         default: subtitle = "\(connected.count) devices connected."
         }
         return HomeModel(greeting: greeting(), subtitle: subtitle, thisDevice: this, others: others,
-                         targets: connected.map { .init(id: $0.id, name: $0.name) })
+                         targets: connected.map { .init(id: $0.id, name: $0.name) },
+                         warning: settings.inputSharing ? SecureInput.message(for: permissions.secureInput) : nil)
     }
 }

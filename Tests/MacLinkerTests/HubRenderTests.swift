@@ -17,7 +17,7 @@ final class HubRenderTests: XCTestCase {
                                     symbol: DeviceCardModel.symbol(for: air), status: .connected, detail: "2 ms · USB-C cable",
                                     rows: DeviceCardModel.rows(for: air))
         return HomeModel(greeting: "Good evening", subtitle: "Connected to Kaung’s MacBook Air.", thisDevice: this,
-                         others: [other], targets: [.init(id: "air", name: other.name)])
+                         others: [other], targets: [.init(id: "air", name: other.name)], warning: nil)
     }
 
     @MainActor private func render<V: View>(_ view: V, name: String, dark: Bool = false) throws {
@@ -47,5 +47,8 @@ final class HubRenderTests: XCTestCase {
         var empty = sampleModel(); empty.others = []; empty.targets = []; empty.subtitle = "Looking for your devices on the local network…"
         try render(screen(empty), name: "hub_home_empty")
         try render(screen(sampleModel()), name: "hub_home_dark", dark: true)
+        var warned = sampleModel()
+        warned.warning = SecureInput.message(for: SecureInputStatus(enabled: true, appName: "KGuard"))
+        try render(screen(warned), name: "hub_home_warning")
     }
 }

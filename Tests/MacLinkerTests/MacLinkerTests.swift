@@ -415,3 +415,17 @@ final class HubLogicTests: XCTestCase {
         XCTAssertEqual(MessageType.lockScreen.rawValue, 53); XCTAssertEqual(MessageType.deviceInfo.rawValue, 80)
     }
 }
+
+final class SecureInputTests: XCTestCase {
+    func testMessageNamesTheAppOrStaysSilent() {
+        XCTAssertNil(SecureInput.message(for: SecureInputStatus()))
+        let named = SecureInput.message(for: SecureInputStatus(enabled: true, appName: "KGuard"))
+        XCTAssertTrue(named?.contains("KGuard") == true && named?.contains("Secure Input") == true)
+        XCTAssertTrue(SecureInput.message(for: SecureInputStatus(enabled: true, appName: nil))?.hasPrefix("Keyboard sharing is blocked. An app") == true)
+    }
+
+    func testStatusReadDoesNotCrash() {
+        let s = SecureInput.status()
+        if !s.enabled { XCTAssertNil(s.appName) }
+    }
+}

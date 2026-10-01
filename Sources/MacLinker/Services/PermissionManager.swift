@@ -5,6 +5,7 @@ import ApplicationServices
 final class PermissionManager: ObservableObject {
     @Published private(set) var accessibility = false
     @Published private(set) var inputMonitoring = false
+    @Published private(set) var secureInput = SecureInputStatus()
     private var timer: Timer?
 
     var allGranted: Bool { accessibility && inputMonitoring }
@@ -22,6 +23,8 @@ final class PermissionManager: ObservableObject {
         let i = CGPreflightListenEventAccess()
         if a != accessibility { accessibility = a }
         if i != inputMonitoring { inputMonitoring = i }
+        let secure = SecureInput.status()
+        if secure != secureInput { secureInput = secure }
     }
 
     func requestAccessibility() {
