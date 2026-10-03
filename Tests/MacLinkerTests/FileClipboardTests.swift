@@ -103,7 +103,7 @@ final class FileClipboardTests: XCTestCase {
 
     private func connect(_ a: Side, _ b: Side) {
         func route(from: Side, to: Side) {
-            from.manager.send = { _, type, payload in
+            from.manager.send = { _, _, payload in
                 DispatchQueue.main.async { to.manager.handleOffer(payload, from: "peer") }
             }
             from.files.send = { type, payload, _, done in

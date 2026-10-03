@@ -117,7 +117,7 @@ final class AppState: ObservableObject {
                 self?.clipboard.history.addNote("Files from \(name) arrived, but you copied something else meanwhile. They're in the list below if you still want them.", source: name)
             }
         }
-        fileClipboard.onSkipped = { [weak self] urls, total in
+        fileClipboard.onSkipped = { [weak self] _, total in
             let size = ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file)
             let why = total == 0 ? "too many items at once (the limit is \(ClipboardFilesOffer.maxItems))"
                                  : "\(size) is over the 250 MB limit for automatic copying"
