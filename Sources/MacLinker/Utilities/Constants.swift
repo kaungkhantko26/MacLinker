@@ -7,6 +7,10 @@ enum K {
     static let systemControlMinVersion = "1.2.0"
     /// First version that understands device-info and lock-screen messages.
     static let hubMinVersion = "1.5.0"
+    /// First version that understands copied-files messages.
+    static let fileClipboardMinVersion = "1.6.0"
+    /// Copied files are sent automatically only up to this total size; anything bigger needs Send File.
+    static let fileClipboardLimit: UInt64 = 250 * 1024 * 1024
     static let bundleID = "com.maclinker.app"
     static let serviceType = "_maclinker._tcp"
     static let defaultPort: UInt16 = 52845

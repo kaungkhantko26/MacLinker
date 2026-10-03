@@ -11,6 +11,8 @@ final class Settings: ObservableObject {
     @Published var remoteSystemControl: Bool { didSet { defaults.set(remoteSystemControl, forKey: "remoteSystemControl") } }
     /// Let paired Macs lock this Mac's screen.
     @Published var allowRemoteLock: Bool { didSet { defaults.set(allowRemoteLock, forKey: "allowRemoteLock") } }
+    /// Copy a file, folder or app here, paste it on the other Mac.
+    @Published var fileClipboard: Bool { didSet { defaults.set(fileClipboard, forKey: "fileClipboard") } }
     /// Bind LAN connections to the physical interface so a VPN (Outline) can't swallow them.
     @Published var pinToLAN: Bool { didSet { defaults.set(pinToLAN, forKey: "pinToLAN") } }
     @Published var edgePush: Double { didSet { defaults.set(edgePush, forKey: "edgePush") } }
@@ -30,6 +32,7 @@ final class Settings: ObservableObject {
         fileSharing = bool("fileSharing", true)
         remoteSystemControl = bool("remoteSystemControl", true)
         allowRemoteLock = bool("allowRemoteLock", true)
+        fileClipboard = bool("fileClipboard", true)
         pinToLAN = bool("pinToLAN", true)
         launchAtLogin = bool("launchAtLogin", false)
         let push = UserDefaults.standard.double(forKey: "edgePush")

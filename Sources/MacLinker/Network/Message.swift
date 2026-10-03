@@ -28,6 +28,8 @@ enum MessageType: UInt8 {
     case systemQuery = 52
     case lockScreen = 53
 
+    case clipboardFiles = 90
+
     case deviceInfo = 80
     case deviceInfoQuery = 81
 
@@ -182,6 +184,9 @@ struct FileOfferPayload: Codable {
     var id: UUID
     var name: String
     var size: UInt64
+    /// True for files sent because they were copied. A Mac that isn't expecting a copied batch refuses them
+    /// instead of saving them to Downloads like an ordinary received file.
+    var clipboard: Bool?
 }
 
 /// Ask the receiving Mac to change one of its own settings.

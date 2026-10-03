@@ -205,16 +205,42 @@ struct ClipboardRow: View {
     let entry: ClipboardEntry
     let targets: [DeviceActionButton.Target]
 
+    private var icon: String {
+        switch entry.kind {
+        case .image: return "photo"
+        case .files: return "doc.on.doc"
+        case .note: return "info.circle"
+        case .text: return "text.alignleft"
+        }
+    }
+
+    private var title: String {
+        switch entry.kind {
+        case .image: return "Image (\(ByteCountFormatter.string(fromByteCount: Int64(entry.byteCount), countStyle: .file)))"
+        case .files: return entry.fileURLs.count == 1 ? "File: \(entry.preview)" : "Files: \(entry.preview)"
+        default: return entry.preview
+        }
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: entry.kind == .image ? "photo" : "text.alignleft").foregroundStyle(Color.accentColor).frame(width: 20)
+            Image(systemName: icon).foregroundStyle(entry.kind == .note ? Color.orange : Color.accentColor).frame(width: 20)
             VStack(alignment: .leading, spacing: 3) {
-                Text(entry.kind == .image ? "Image (\(ByteCountFormatter.string(fromByteCount: Int64(entry.byteCount), countStyle: .file)))" : entry.preview)
-                    .lineLimit(3).font(.callout)
+                Text(title).lineLimit(3).font(.callout)
                 Text("\(entry.source) · \(entry.date.formatted(.relative(presentation: .named)))").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if let message = entry.message {
+            if entry.kind == .files {
+                let alive = entry.fileURLs.filter { FileManager.default.fileExists(atPath: $0.path) }
+                Button("Copy") { app.fileClipboard.putOnPasteboard(alive) }.controlSize(.small).disabled(alive.isEmpty)
+                Button("Show") { NSWorkspace.shared.activateFileViewerSelecting(alive) }.controlSize(.small).disabled(alive.isEmpty)
+                Menu("Send") {
+                    if targets.isEmpty { Text("No connected Macs") }
+                    ForEach(targets) { t in Button(t.name) { app.fileClipboard.send(alive, to: [t.id]) } }
+                }.menuStyle(.borderlessButton).fixedSize().disabled(targets.isEmpty || alive.isEmpty)
+            } else if entry.kind == .note {
+                EmptyView()
+            } else if let message = entry.message {
                 Button("Copy") { app.clipboard.copy(message) }.controlSize(.small)
                 Menu("Send") {
                     if targets.isEmpty { Text("No connected Macs") }

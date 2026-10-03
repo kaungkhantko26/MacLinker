@@ -20,6 +20,10 @@ final class FileTransferManager: ObservableObject {
     var isEnabled: () -> Bool = { true }
     var peerName: (String) -> String = { $0 }
     var send: ((MessageType, Data, String, ((Error?) -> Void)?) -> Void)?
+    /// Lets another feature (copied files) choose where an incoming file is stored. Nil means Downloads/MacLinker.
+    var destinationFor: (UUID) -> URL? = { _ in nil }
+    /// Called on the main queue when an incoming file finished (url set) or failed (error set).
+    var onFinished: ((UUID, URL?, String?) -> Void)?
 
     private struct Incoming {
         let handle: FileHandle
@@ -50,19 +54,25 @@ final class FileTransferManager: ObservableObject {
         for url in urls where url.isFileURL {
             var isDir: ObjCBool = false
             guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else { continue }
-            io.async { self.sendFile(url, to: peer) }
+            io.async { self.performSend(url, to: peer) }
         }
     }
 
-    private func sendFile(_ url: URL, to peer: String) {
-        let id = UUID()
+    /// Sends one file under a caller-chosen id and name (used for copied files and archives).
+    func sendFile(_ url: URL, to peer: String, id: UUID, name: String, completion: @escaping (String?) -> Void) {
+        io.async { self.performSend(url, to: peer, id: id, name: name, clipboard: true, completion: completion) }
+    }
+
+    private func performSend(_ url: URL, to peer: String, id: UUID = UUID(), name: String? = nil,
+                             clipboard: Bool = false, completion: ((String?) -> Void)? = nil) {
+        let name = name ?? url.lastPathComponent
         let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? UInt64) ?? 0
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
-        let item = TransferItem(id: id, name: url.lastPathComponent, size: size, direction: .sending,
-                                peerName: peerName(peer))
+        guard let handle = try? FileHandle(forReadingFrom: url) else { completion?("Couldn't read the file"); return }
+        let item = TransferItem(id: id, name: name, size: size, direction: .sending, peerName: peerName(peer))
         DispatchQueue.main.async { self.transfers.insert(item, at: 0) }
 
-        guard let offer = try? JSONEncoder().encode(FileOfferPayload(id: id, name: url.lastPathComponent, size: size)) else { return }
+        guard let offer = try? JSONEncoder().encode(FileOfferPayload(id: id, name: name, size: size,
+                                                                         clipboard: clipboard ? true : nil)) else { return }
         send?(.fileOffer, offer, peer, nil)
 
         var hasher = SHA256()
@@ -70,6 +80,7 @@ final class FileTransferManager: ObservableObject {
         func finish(_ error: String?) {
             try? handle.close()
             update(id) { $0.status = error.map { .failed($0) } ?? .done }
+            completion?(error)
         }
         func next() {
             if takeCancelled(id) { finish("Cancelled by receiver"); return }
@@ -102,10 +113,18 @@ final class FileTransferManager: ObservableObject {
             case .fileOffer:
                 let offer = try JSONDecoder().decode(FileOfferPayload.self, from: message.payload)
                 guard isEnabled() else { send?(.fileAbort, offer.id.data, peer, nil); return }
-                let url = uniqueURL(for: offer.name)
+                let reserved = destinationFor(offer.id)
+                if offer.clipboard == true, reserved == nil {      // a copied file we weren't told to expect
+                    send?(.fileAbort, offer.id.data, peer, nil)
+                    return
+                }
+                let url = reserved ?? uniqueURL(for: offer.name)
+                try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
                 FileManager.default.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600])
                 guard let handle = try? FileHandle(forWritingTo: url) else {
-                    send?(.fileAbort, offer.id.data, peer, nil); return
+                    send?(.fileAbort, offer.id.data, peer, nil)
+                    onFinished?(offer.id, nil, "Couldn't create the file")
+                    return
                 }
                 incoming[offer.id] = Incoming(handle: handle, url: url, expected: offer.size)
                 var item = TransferItem(id: offer.id, name: url.lastPathComponent, size: offer.size,
@@ -132,9 +151,11 @@ final class FileTransferManager: ObservableObject {
                 var hasher = f.hasher
                 if Data(hasher.finalize()) == digest, f.received == f.expected {
                     update(id) { $0.status = .done; $0.transferred = $0.size }
+                    onFinished?(id, f.url, nil)
                 } else {
                     try? FileManager.default.removeItem(at: f.url)
                     update(id) { $0.status = .failed("Checksum mismatch") }
+                    onFinished?(id, nil, "Checksum mismatch")
                 }
             case .fileAbort:
                 var r = ByteReader(message.payload)
@@ -154,6 +175,7 @@ final class FileTransferManager: ObservableObject {
             try? FileManager.default.removeItem(at: f.url)
         }
         update(id) { $0.status = .failed(reason) }
+        onFinished?(id, nil, reason)
     }
 
     func peerDisconnected() {

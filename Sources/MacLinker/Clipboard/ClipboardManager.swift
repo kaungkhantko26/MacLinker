@@ -5,6 +5,8 @@ final class ClipboardManager {
     var isEnabled: () -> Bool = { true }
     var broadcast: ((Data) -> Void)?
     let history = ClipboardHistory()
+    /// Files were copied (Cmd+C on a file in Finder). Called instead of sending the file's name as text.
+    var onFilesCopied: (([URL]) -> Void)?
 
     private let monitor = ClipboardMonitor()
     private let pasteboard = NSPasteboard.general
@@ -21,9 +23,17 @@ final class ClipboardManager {
     }
 
     /// The current clipboard as a message, or nil if it's empty, too big, or marked sensitive by a password manager.
+    /// File and folder URLs on the clipboard (what Finder puts there on Cmd+C).
+    func copiedFileURLs() -> [URL] {
+        let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        return urls.map(\.standardizedFileURL)
+    }
+
     func currentMessage() -> ClipboardMessage? {
         let types = Set(pasteboard.types ?? [])
         guard types.isDisjoint(with: sensitive) else { return nil }
+        // Copied files also put their *name* on the clipboard as text; that must not be sent as if it were the content.
+        guard copiedFileURLs().isEmpty else { return nil }
         var entries: [ClipboardMessage.Entry] = []
         if let png = pasteboard.data(forType: .png) ?? tiffAsPNG() {
             entries.append(.init(type: NSPasteboard.PasteboardType.png.rawValue, data: png))
@@ -37,6 +47,12 @@ final class ClipboardManager {
     }
 
     private func localChanged() {
+        let files = copiedFileURLs()
+        if !files.isEmpty {
+            history.addFiles(files, source: "This Mac")
+            if isEnabled() { onFilesCopied?(files) }
+            return
+        }
         guard let message = currentMessage() else { return }
         history.add(message, source: "This Mac")
         guard isEnabled(), let payload = try? JSONEncoder().encode(message) else { return }
@@ -47,6 +63,9 @@ final class ClipboardManager {
     func payloadForSendNow() -> Data? {
         currentMessage().flatMap { try? JSONEncoder().encode($0) }
     }
+
+    /// Called after something else rewrote the clipboard (received copied files) so it isn't re-sent.
+    func acknowledgeExternalWrite() { monitor.acknowledgeOwnWrite() }
 
     /// Puts an item from the history back on this Mac's clipboard.
     func copy(_ message: ClipboardMessage) {

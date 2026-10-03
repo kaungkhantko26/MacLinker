@@ -20,6 +20,7 @@ final class AppState: ObservableObject {
     let updater = Updater()
     let system = RemoteSystemManager()
     let deviceInfo = DeviceInfoManager()
+    let fileClipboard: FileClipboardManager
     let shelf = ShelfStore()
     let discovery: DeviceDiscoveryManager
     let connections: ConnectionManager
@@ -30,6 +31,7 @@ final class AppState: ObservableObject {
     private var bag = Set<AnyCancellable>()
 
     init() {
+        fileClipboard = FileClipboardManager(files: files)
         discovery = DeviceDiscoveryManager(ownID: identity.deviceID)
         connections = ConnectionManager(identity: identity, trusted: trusted)
         reconnect = ReconnectManager(identity: identity, trusted: trusted, discovery: discovery,
@@ -98,6 +100,31 @@ final class AppState: ObservableObject {
         deviceInfo.link = { [weak self] in self?.paths.lanInterface }
         system.send = { [weak self] id, type, payload in self?.connections.send(type, payload: payload, to: id) }
 
+        fileClipboard.isEnabled = { [weak self] in
+            guard let self else { return false }
+            return self.settings.fileClipboard && self.settings.clipboardSharing && self.settings.fileSharing
+        }
+        fileClipboard.peerSupports = { [weak self] id in self?.peerSupportsFileClipboard(id) ?? false }
+        fileClipboard.peerName = { [weak self] id in self?.connections.peers[id]?.name ?? self?.trusted.device(id)?.name ?? "Another Mac" }
+        fileClipboard.send = { [weak self] id, type, payload in self?.connections.send(type, payload: payload, to: id) }
+        fileClipboard.wrotePasteboard = { [weak self] in self?.clipboard.acknowledgeExternalWrite() }
+        fileClipboard.onReceived = { [weak self] urls, name, onClipboard in
+            self?.clipboard.history.addFiles(urls, source: name)
+            if !onClipboard {
+                self?.clipboard.history.addNote("Files from \(name) arrived, but you copied something else meanwhile. They're in the list below if you still want them.", source: name)
+            }
+        }
+        fileClipboard.onSkipped = { [weak self] urls, total in
+            let size = ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file)
+            let why = total == 0 ? "too many items at once (the limit is \(ClipboardFilesOffer.maxItems))"
+                                 : "\(size) is over the 250 MB limit for automatic copying"
+            self?.clipboard.history.addNote("Copied files weren't sent: \(why). Use Send File for big files.", source: "This Mac")
+        }
+        clipboard.onFilesCopied = { [weak self] urls in
+            guard let self else { return }
+            self.fileClipboard.send(urls, to: self.connections.connectedIDs)
+        }
+
         files.isEnabled = { [weak self] in self?.settings.fileSharing ?? false }
         files.peerName = { [weak self] id in self?.trusted.device(id)?.name ?? id }
         files.send = { [weak self] type, payload, id, done in
@@ -149,6 +176,8 @@ final class AppState: ObservableObject {
             clipboard.receive(msg.payload, from: connections.peers[id]?.name ?? trusted.device(id)?.name ?? "Another Mac")
         case .fileOffer, .fileChunk, .fileEnd, .fileAbort:
             files.handle(message: msg, from: id)
+        case .clipboardFiles:
+            fileClipboard.handleOffer(msg.payload, from: id)
         case .deviceInfo, .deviceInfoQuery:
             deviceInfo.handle(msg, from: id)
         case .lockScreen, .systemControl, .systemState, .systemQuery:
@@ -223,6 +252,11 @@ final class AppState: ObservableObject {
         return !Updater.isNewer(K.hubMinVersion, than: v)
     }
 
+    func peerSupportsFileClipboard(_ id: String) -> Bool {
+        guard let v = connections.peers[id]?.appVersion else { return false }
+        return !Updater.isNewer(K.fileClipboardMinVersion, than: v)
+    }
+
     /// The Refresh button: browse again, retry offline Macs now, and re-read this Mac and every peer's info.
     func refresh() {
         guard !isRefreshing else { return }
@@ -237,6 +271,8 @@ final class AppState: ObservableObject {
     func lock(_ id: String) { system.lock(id) }
 
     func sendClipboard(to id: String) {
+        let files = clipboard.copiedFileURLs()
+        if !files.isEmpty { fileClipboard.send(files, to: [id]); return }
         guard let payload = clipboard.payloadForSendNow() else { return }
         connections.send(.clipboard, payload: payload, to: id)
     }

@@ -1,7 +1,7 @@
 import Foundation
 
 struct ClipboardEntry: Identifiable, Equatable {
-    enum Kind { case text, image }
+    enum Kind { case text, image, files, note }
     let id = UUID()
     let date = Date()
     /// "This Mac" or the name of the Mac it came from.
@@ -11,6 +11,8 @@ struct ClipboardEntry: Identifiable, Equatable {
     let byteCount: Int
     /// Kept so the item can be copied or sent again. Nil when it was too large to keep.
     let message: ClipboardMessage?
+    /// For copied files: where they are on this Mac (the original, or the cache for files that arrived).
+    var fileURLs: [URL] = []
 
     static func == (a: ClipboardEntry, b: ClipboardEntry) -> Bool { a.id == b.id }
 }
@@ -26,6 +28,23 @@ final class ClipboardHistory: ObservableObject {
         guard let entry = Self.entry(for: message, source: source) else { return }
         // Don't list the same thing twice in a row (copying it here, then it echoing back).
         if let last = entries.first, last.kind == entry.kind, last.preview == entry.preview, last.byteCount == entry.byteCount { return }
+        entries.insert(entry, at: 0)
+        if entries.count > Self.limit { entries.removeLast(entries.count - Self.limit) }
+    }
+
+    func addFiles(_ urls: [URL], source: String) {
+        guard !urls.isEmpty else { return }
+        let names = urls.map(\.lastPathComponent)
+        let preview = names.count == 1 ? names[0] : "\(names[0]) and \(names.count - 1) more"
+        insert(ClipboardEntry(source: source, kind: .files, preview: preview, byteCount: 0, message: nil, fileURLs: urls))
+    }
+
+    /// A line of explanation in the list, e.g. why copied files weren't sent.
+    func addNote(_ text: String, source: String) {
+        insert(ClipboardEntry(source: source, kind: .note, preview: text, byteCount: 0, message: nil))
+    }
+
+    private func insert(_ entry: ClipboardEntry) {
         entries.insert(entry, at: 0)
         if entries.count > Self.limit { entries.removeLast(entries.count - Self.limit) }
     }
