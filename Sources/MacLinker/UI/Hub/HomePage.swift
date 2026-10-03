@@ -129,8 +129,11 @@ extension AppState {
             case .nearby: status = .nearby
             case .offline: status = .offline
             }
-            return DeviceCardModel(id: d.id, name: d.name, subtitle: DeviceCardModel.subtitle(for: remote),
-                                   symbol: DeviceCardModel.symbol(for: remote), status: status,
+            // The Windows app reports a 0.x version, which no Mac release ever has.
+            let version = connections.peers[d.id]?.appVersion ?? ""
+            let isWindows = version.hasPrefix("0.") && version != "0"
+            return DeviceCardModel(id: d.id, name: d.name, subtitle: isWindows ? "Windows PC" : DeviceCardModel.subtitle(for: remote),
+                                   symbol: isWindows ? "pc" : DeviceCardModel.symbol(for: remote), status: status,
                                    detail: detail.isEmpty ? nil : detail.joined(separator: " · "),
                                    rows: DeviceCardModel.rows(for: remote), isTrusted: d.isTrusted)
         }

@@ -28,16 +28,19 @@ final class Handshake {
 
     let role: Role
     private let identity: Curve25519.Signing.PrivateKey
-    private let ephemeral = Curve25519.KeyAgreement.PrivateKey()
+    private let ephemeral: Curve25519.KeyAgreement.PrivateKey
 
     let ownHello: Data
     private(set) var peerIdentity: Data?
     private var peerEphemeral: Data?
     private var transcript: Data?
 
-    init(role: Role, identity: Curve25519.Signing.PrivateKey) {
+    /// `ephemeral` is injectable only so tests can produce reproducible vectors; production uses a fresh key.
+    init(role: Role, identity: Curve25519.Signing.PrivateKey,
+         ephemeral: Curve25519.KeyAgreement.PrivateKey = Curve25519.KeyAgreement.PrivateKey()) {
         self.role = role
         self.identity = identity
+        self.ephemeral = ephemeral
         var w = ByteWriter()
         w.u32(K.protocolMagic)
         w.u8(K.protocolVersion)

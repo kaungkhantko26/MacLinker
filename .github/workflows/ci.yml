@@ -24,6 +24,18 @@ jobs:
           name: MacLinker-ci-build
           path: build/MacLinker.zip
 
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Test the shared core (protocol, crypto, sessions, control logic)
+        run: dotnet test windows/tests/MacLinker.Core.Tests
+      - name: Build the Windows app
+        run: dotnet build windows/src/MacLinker.Windows -c Release
+
   lint:
     runs-on: macos-latest
     continue-on-error: true

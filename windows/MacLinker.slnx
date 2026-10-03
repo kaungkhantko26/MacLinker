@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MacLinker.Core/MacLinker.Core.csproj" />
+    <Project Path="src/MacLinker.Windows/MacLinker.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MacLinker.Core.Tests/MacLinker.Core.Tests.csproj" />
+  </Folder>
+</Solution>

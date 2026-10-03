@@ -10,3 +10,8 @@ Resources/AppIcon.icns
 *.key
 *.cer
 
+
+# Windows app build output
+windows/**/bin/
+windows/**/obj/
+windows/**/TestResults/

@@ -33,6 +33,7 @@ MacLinker swaps that stack for something simple and visible: **plain encrypted T
 
 ## Features
 
+- **Windows too**: pair a Windows PC with a Mac, in both directions. See [Windows](#windows)
 - **A hub window**: Home shows each Mac as a card with its link, audio output, and the keyboards and mice attached (with battery levels), plus one-click Send File, Send Clipboard and Lock; a Refresh button rescans for devices
 - **Copy and paste files between Macs**: press ⌘C on a file, folder or app on one Mac and ⌘V on the other
 - **Drag across the screen edge** (experimental): drag a file, folder, app, web link or text to the edge of one Mac and keep dragging on the other
@@ -85,6 +86,19 @@ Limits, so nothing surprises you:
 - A drag from an app that only offers its content on demand (for example Photos or Mail attachments) carries no files that MacLinker can see, so it won't cross.
 - Drag across the edge is new and **experimental**. It starts a real system drag on the other Mac, which depends on macOS behaviour that is hard to test automatically. If it misbehaves, switch it off in Settings and tell us.
 
+## Windows
+
+MacLinker also runs on Windows 10/11 (x64 and ARM64) and pairs with a Mac the same way two Macs pair, in both directions.
+
+1. Download `MacLinker-Windows-x64.zip` (or `-arm64.zip`) from the [latest release](https://github.com/kaungkhantko26/MacLinker/releases/latest), unzip, and run `MacLinker.exe`. It is a single file and needs nothing installed.
+2. Windows says "Windows protected your PC" because the app isn't signed: **More info → Run anyway**. Allow it through the firewall on **Private networks** when asked.
+3. Your Mac shows up as **Nearby**. Press **Pair**, check the 6-digit code matches on both, confirm on both, then say which side the Mac sits on.
+4. Push the pointer against the screen edge to cross, or press **Ctrl+Alt+Shift+Space** on the PC to switch.
+
+**USB cable:** only a **Thunderbolt 3/4 or USB4** cable between a Mac and a PC that both have those ports makes a network link; an ordinary USB cable does not. Wi-Fi and Ethernet always work. Details and limits are in [windows/README.md](windows/README.md).
+
+The Windows app is new: the engine is verified against the real Mac app, but the Windows-only parts (keyboard and mouse injection and capture, clipboard, tray) have not been run on a Windows PC yet. Please report problems with your Windows version.
+
 ## For the lowest latency
 
 Use a USB-C/Thunderbolt cable between the Macs (Thunderbolt Bridge appears in System Settings > Network) or Ethernet. Otherwise use 5 GHz Wi-Fi near the router. The Devices tab shows the link in use (`bridge0` = cable, `en0` = Wi-Fi) and live latency.
@@ -129,6 +143,7 @@ Input capture, batching and injection run on a dedicated high-priority thread, s
 - [ ] Display layout matching for multi-monitor setups
 - [ ] Remote display resolution and refresh rate
 - [ ] Remote sleep, lock and wake
+- [ ] Windows: real-hardware testing, code signing, an installer
 - [ ] Notarized builds
 - [ ] Media-key forwarding and folder transfer
 
