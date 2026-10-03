@@ -28,11 +28,14 @@ MacLinker swaps that stack for something simple and visible: **plain encrypted T
 | Works next to a VPN (e.g. Outline) | Often breaks | **Yes: traffic stays on the local link** |
 | Shows what's wrong | No | **Link in use, latency, connection state** |
 | Remote brightness / volume of the other Mac | No | **Yes** |
+| Copy a file on one Mac, paste on the other | Yes | **Yes (up to 250 MB)** |
 | Open source | No | **Yes (MIT)** |
 
 ## Features
 
 - **A hub window**: Home shows each Mac as a card with its link, audio output, and the keyboards and mice attached (with battery levels), plus one-click Send File, Send Clipboard and Lock; a Refresh button rescans for devices
+- **Copy and paste files between Macs**: press ⌘C on a file, folder or app on one Mac and ⌘V on the other
+- **Drag across the screen edge** (experimental): drag a file, folder, app, web link or text to the edge of one Mac and keep dragging on the other
 - **Drop Shelf** (park files, send later) and **clipboard history** (this Mac and your others, kept in memory only)
 - **Edge-crossing control**: push the pointer against a screen edge to move to the other Mac, with the keyboard following
 - **Clipboard sync** for text, links and images (password-manager items are never sent)
@@ -67,6 +70,20 @@ Then, on each Mac:
 Emergency exit while controlling the other Mac: **Control + Option + Command + Esc**.
 
 Updates install themselves: Settings > Updates > Check Now, then Restart & Update.
+
+## Copy files and drag across the edge
+
+**Copy and paste.** Select files, folders or apps in Finder, press ⌘C, then ⌘V in a Finder window on the other Mac. MacLinker sends the copy to the other Mac's cache as soon as you copy, and points that Mac's clipboard at it. Apps and folders travel as an archive that keeps permissions, symlinks and code signatures intact. If you copy something else on the receiving Mac before the files arrive, yours wins and the files wait in the Clipboard page.
+
+**Drag across the edge.** Start dragging a file, folder, app, link (for example from Safari's address bar) or some text, and push the pointer against the screen edge facing the other Mac. The drag continues there: move over a window and drop. It works both ways. Dragging back from the Mac you are controlling to the one you are sitting at works the same way.
+
+Limits, so nothing surprises you:
+
+- Both Macs need MacLinker 1.7.0 or newer (copy and paste needs 1.6.0). Turn either off in Settings.
+- Files, folders and apps are limited to **250 MB** in total per copy or drag. Bigger ones are not sent; use Send File.
+- Dropped files arrive as *file promises*, which Finder, Mail, Safari upload areas and most modern apps accept. Dropping onto a Dock icon is not supported.
+- A drag from an app that only offers its content on demand (for example Photos or Mail attachments) carries no files that MacLinker can see, so it won't cross.
+- Drag across the edge is new and **experimental**. It starts a real system drag on the other Mac, which depends on macOS behaviour that is hard to test automatically. If it misbehaves, switch it off in Settings and tell us.
 
 ## For the lowest latency
 

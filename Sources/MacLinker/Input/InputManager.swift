@@ -17,6 +17,11 @@ final class InputManager: ObservableObject {
     /// Mirror of the real state for the UI. The real state lives on the input thread.
     @Published private(set) var state: ControlState = .local
     var send: ((String, MessageType, Data) -> Void)?
+    /// Called on the input thread when the pointer reaches an edge during a drag; announces the dragged items to the peer.
+    /// Returns true if they were announced (and control should pass over).
+    var dragProbe: ((String) -> Bool)?
+    /// Called on the main thread when control has just moved to this Mac (or back), with the point to pick a drag up at.
+    var dragReceiver: ((String, CGPoint) -> Void)?
 
     // Everything below is owned by the input thread; the public methods hop onto it.
     private let thread = InputThread()
@@ -33,6 +38,12 @@ final class InputManager: ObservableObject {
     private var cursorHidden = false
     private var pendingMove = CGPoint.zero
     private var flushTimer: CFRunLoopTimer?
+    private var dragEnabled = true
+    private let dragPasteboard = NSPasteboard(name: .drag)
+    private var dragDetector = DragDetector()          // drags that start on this Mac's own mouse
+    private var injectedDragDetector = DragDetector()  // drags the controlling Mac starts here
+    /// True while a drag handed over from the other Mac is being held by an injected button press.
+    private var handoffButtonHeld = false
 
     init() {
         monitor = InputMonitor(runLoop: thread.runLoop)
@@ -44,8 +55,9 @@ final class InputManager: ObservableObject {
     @discardableResult func startMonitoring() -> Bool { monitor.start() }
 
     /// Thread-safe: settings and layout changes are applied on the input thread, in order.
-    func configure(enabled: Bool, push: Double, edgePeers: [Edge: String]) {
+    func configure(enabled: Bool, push: Double, edgePeers: [Edge: String], dragEnabled: Bool = true) {
         thread.perform {
+            self.dragEnabled = dragEnabled
             self.enabled = enabled
             self.push = push
             self.edgePeers = edgePeers
@@ -71,6 +83,9 @@ final class InputManager: ObservableObject {
 
     /// Passive tap: the pointer is on this Mac. Only watches for the edge push.
     private func handleLocal(_ type: CGEventType, _ event: CGEvent) {
+        // Remember the drag pasteboard when the button goes down: a real drag is when it changes afterwards.
+        if type == .leftMouseDown { dragDetector.buttonDown(pasteboardCount: dragPasteboard.changeCount); return }
+        if type == .leftMouseUp { dragDetector.buttonUp(); return }
         guard case .local = controlState, type == .mouseMoved || type == .leftMouseDragged
                 || type == .rightMouseDragged || type == .otherMouseDragged,
               enabled, !edgePeers.isEmpty else { return }
@@ -79,8 +94,16 @@ final class InputManager: ObservableObject {
         detector.threshold = push
         if let hit = detector.update(location: event.location, delta: delta,
                                      bounds: ScreenGeometry.bounds, edges: Set(edgePeers.keys)),
-           let peer = edgePeers[hit.edge], NSEvent.pressedMouseButtons == 0 {
-            beginControlling(peer: peer, edge: hit.edge, position: hit.position)
+           let peer = edgePeers[hit.edge] {
+            let buttons = NSEvent.pressedMouseButtons
+            if buttons == 0 {
+                beginControlling(peer: peer, edge: hit.edge, position: hit.position)
+            } else if buttons == 1, dragEnabled, type == .leftMouseDragged,
+                      dragDetector.isDragging(pasteboardCount: dragPasteboard.changeCount),
+                      dragProbe?(peer) == true {
+                // A drag is in progress and its items have been announced: pass control over carrying the drag.
+                beginControlling(peer: peer, edge: hit.edge, position: hit.position, abandoningLocalDrag: true)
+            }
         }
     }
 
@@ -90,12 +113,15 @@ final class InputManager: ObservableObject {
         return forward(type, event, to: peer)
     }
 
-    private func beginControlling(peer: String, edge: Edge, position: Float) {
+    private func beginControlling(peer: String, edge: Edge, position: Float, abandoningLocalDrag: Bool = false) {
         setState(.controlling(peer: peer, edge: edge))
         monitor.setActive(true)
         CGAssociateMouseAndMouseCursorPosition(0)
         setCursorHidden(true)
         send?(peer, .enterControl, ControlPayload(edge: edge, position: position).encode())
+        // The drag continues on the other Mac; cancel the one here, or it would sit frozen waiting for a mouse-up
+        // that this Mac will never see.
+        if abandoningLocalDrag { injector.cancelDrag() }
         startFlushing(to: peer)
     }
 
@@ -202,11 +228,18 @@ final class InputManager: ObservableObject {
                 returnDetector = ScreenEdgeDetector(threshold: push)
                 setState(.controlled(peer: peer, returnEdge: returnEdge))
                 injector.warp(to: virtualCursor)
+                let arrival = virtualCursor
+                DispatchQueue.main.async { self.dragReceiver?(peer, arrival) }   // starts a drag if one was announced
             case .releaseControl:
                 let p = try ControlPayload.decode(message.payload)
                 switch controlState {
-                case .controlling(let controlled, _) where controlled == peer:
-                    endControlling(warpTo: p.position >= 0 ? p.position : nil)
+                case .controlling(let controlled, let edge) where controlled == peer:
+                    let warp = p.position >= 0 ? p.position : nil
+                    endControlling(warpTo: warp)
+                    if let warp, dragEnabled {
+                        let point = edge.point(at: warp, inset: 6, in: ScreenGeometry.bounds)
+                        DispatchQueue.main.async { self.dragReceiver?(peer, point) }   // a drag may be coming back
+                    }
                 case .controlled(let controller, _) where controller == peer:
                     endControlled()
                 default: break
@@ -220,12 +253,22 @@ final class InputManager: ObservableObject {
                                         y: min(max(virtualCursor.y + delta.y, b.minY), b.maxY - 1))
                 injector.move(to: virtualCursor, delta: delta)
                 if let hit = returnDetector.update(location: virtualCursor, delta: delta, bounds: b, edges: [returnEdge]) {
+                    // A drag that began on this Mac goes back with the pointer; abandon it here.
+                    if dragEnabled, injector.isButtonDown(0),
+                       injectedDragDetector.isDragging(pasteboardCount: dragPasteboard.changeCount),
+                       dragProbe?(peer) == true {
+                        injector.cancelDrag()
+                    }
                     send?(peer, .releaseControl, ControlPayload(edge: returnEdge, position: hit.position).encode())
                     endControlled()
                 }
             case .mouseButton:
                 guard isControlled(by: peer) else { return }
                 let p = try MouseButtonPayload.decode(message.payload)
+                if p.button == 0 {
+                    if p.down { injectedDragDetector.buttonDown(pasteboardCount: dragPasteboard.changeCount) }
+                    else { injectedDragDetector.buttonUp(); handoffButtonHeld = false }
+                }
                 injector.button(Int(p.button), down: p.down, clickCount: Int(p.clickCount), at: virtualCursor)
             case .scroll:
                 guard isControlled(by: peer) else { return }
@@ -252,6 +295,8 @@ final class InputManager: ObservableObject {
     }
 
     private func endControlled() {
+        // Leaving while a handed-over drag is still held: cancel it rather than drop it on whatever is at the edge.
+        if handoffButtonHeld { injector.cancelDrag(); handoffButtonHeld = false }
         injector.releaseAll(at: virtualCursor)
         returnDetector.reset()
         setState(.local)
@@ -278,6 +323,26 @@ final class InputManager: ObservableObject {
                 self.endControlling(warpTo: nil)
             }
             if case .controlled = self.controlState, !self.enabled { self.endControlled() }
+        }
+    }
+}
+
+/// Lets the drag handoff press and release the left button on this Mac through the input thread.
+extension InputManager: MouseInjecting {
+    func pressLeft(at point: CGPoint) {
+        thread.perform {
+            // While another Mac is driving, use the live pointer position rather than where it was a moment ago.
+            var target = point
+            if case .controlled = self.controlState { target = self.virtualCursor }
+            self.injector.button(0, down: true, clickCount: 1, at: target)
+            self.handoffButtonHeld = true
+        }
+    }
+
+    func releaseLeft(at point: CGPoint) {
+        thread.perform {
+            self.injector.button(0, down: false, clickCount: 1, at: point)
+            self.handoffButtonHeld = false
         }
     }
 }

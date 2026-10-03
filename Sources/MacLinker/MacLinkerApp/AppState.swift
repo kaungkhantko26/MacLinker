@@ -21,6 +21,7 @@ final class AppState: ObservableObject {
     let system = RemoteSystemManager()
     let deviceInfo = DeviceInfoManager()
     let fileClipboard: FileClipboardManager
+    let drag: DragHandoff
     let shelf = ShelfStore()
     let discovery: DeviceDiscoveryManager
     let connections: ConnectionManager
@@ -32,6 +33,7 @@ final class AppState: ObservableObject {
 
     init() {
         fileClipboard = FileClipboardManager(files: files)
+        drag = DragHandoff(files: fileClipboard)
         discovery = DeviceDiscoveryManager(ownID: identity.deviceID)
         connections = ConnectionManager(identity: identity, trusted: trusted)
         reconnect = ReconnectManager(identity: identity, trusted: trusted, discovery: discovery,
@@ -79,6 +81,7 @@ final class AppState: ObservableObject {
             self?.files.peerDisconnected()
             self?.system.peerDisconnected(id)
             self?.deviceInfo.peerDisconnected(id)
+            self?.drag.cancel()
         }
         pairing.onPresent = { WindowManager.shared.showPairing() }
 
@@ -125,6 +128,15 @@ final class AppState: ObservableObject {
             self.fileClipboard.send(urls, to: self.connections.connectedIDs)
         }
 
+        drag.isEnabled = { [weak self] in self?.settings.dragAcrossEdge ?? false }
+        drag.filesAllowed = { [weak self] in self?.settings.fileSharing ?? false }
+        drag.peerSupports = { [weak self] id in self?.peerSupportsDrag(id) ?? false }
+        drag.send = { [weak self] id, type, payload in self?.connections.send(type, payload: payload, to: id) }
+        drag.mouse = input
+        drag.onSkipped = { [weak self] why in self?.clipboard.history.addNote("Drag wasn't carried over: \(why)", source: "This Mac") }
+        input.dragProbe = { [weak self] peer in self?.drag.beginHandoff(to: peer) ?? false }
+        input.dragReceiver = { [weak self] peer, point in self?.drag.startIfPending(from: peer, at: point) }
+
         files.isEnabled = { [weak self] in self?.settings.fileSharing ?? false }
         files.peerName = { [weak self] id in self?.trusted.device(id)?.name ?? id }
         files.send = { [weak self] type, payload, id, done in
@@ -163,7 +175,7 @@ final class AppState: ObservableObject {
         for t in trusted.devices {
             if let edge = t.position, connections.isConnected(t.id) { map[edge] = t.id }
         }
-        input.configure(enabled: settings.inputSharing, push: settings.edgePush, edgePeers: map)
+        input.configure(enabled: settings.inputSharing, push: settings.edgePush, edgePeers: map, dragEnabled: settings.dragAcrossEdge)
     }
 
     // MARK: Routing
@@ -176,6 +188,8 @@ final class AppState: ObservableObject {
             clipboard.receive(msg.payload, from: connections.peers[id]?.name ?? trusted.device(id)?.name ?? "Another Mac")
         case .fileOffer, .fileChunk, .fileEnd, .fileAbort:
             files.handle(message: msg, from: id)
+        case .dragBegin:
+            drag.handle(msg.payload, from: id)
         case .clipboardFiles:
             fileClipboard.handleOffer(msg.payload, from: id)
         case .deviceInfo, .deviceInfoQuery:
@@ -250,6 +264,11 @@ final class AppState: ObservableObject {
     func peerSupportsHub(_ id: String) -> Bool {
         guard let v = connections.peers[id]?.appVersion else { return false }
         return !Updater.isNewer(K.hubMinVersion, than: v)
+    }
+
+    func peerSupportsDrag(_ id: String) -> Bool {
+        guard let v = connections.peers[id]?.appVersion else { return false }
+        return !Updater.isNewer(K.dragMinVersion, than: v)
     }
 
     func peerSupportsFileClipboard(_ id: String) -> Bool {

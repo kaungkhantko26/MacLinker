@@ -29,6 +29,7 @@ enum MessageType: UInt8 {
     case lockScreen = 53
 
     case clipboardFiles = 90
+    case dragBegin = 91
 
     case deviceInfo = 80
     case deviceInfoQuery = 81

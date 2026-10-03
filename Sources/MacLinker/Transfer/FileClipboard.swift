@@ -96,6 +96,9 @@ final class FileClipboardManager {
     private let cacheRoot: URL
     private let work = DispatchQueue(label: "maclinker.fileclipboard", qos: .utility)
 
+    /// What a received batch is for: put on the clipboard, or handed to a drag in progress.
+    enum Purpose { case clipboard, drag }
+
     private struct Batch {
         var peer: String
         var offer: ClipboardFilesOffer
@@ -104,10 +107,15 @@ final class FileClipboardManager {
         var finished: [UUID: URL] = [:]
         var failed = false
         var baselineChangeCount: Int
+        var purpose: Purpose
     }
     private var batches: [UUID: Batch] = [:]
     private var batchOfItem: [UUID: UUID] = [:]
     private var destinations: [UUID: URL] = [:]
+
+    // Final location of each item of a *drag* batch, for a drop that may arrive before or after the data does.
+    private let results = NSCondition()
+    private var itemResults: [UUID: URL?] = [:]
 
     init(files: FileTransferManager, pasteboard: NSPasteboard = .general, cacheRoot: URL? = nil) {
         self.files = files
@@ -122,67 +130,97 @@ final class FileClipboardManager {
 
     // MARK: Sending
 
-    func send(_ urls: [URL], to peers: [String]) {
-        let targets = peers.filter(peerSupports)
-        guard isEnabled(), !targets.isEmpty, !urls.isEmpty else { return }
-        guard urls.count <= ClipboardFilesOffer.maxItems else {
-            DispatchQueue.main.async { self.onSkipped?(urls, 0) }
-            return
-        }
-        work.async { self.prepareAndSend(urls, to: targets) }
+    /// One file (or one folder/app, which travels as a zip) in a batch about to be sent.
+    struct Planned {
+        let source: URL
+        let id: UUID
+        /// Name on the wire ("Folder.zip" for an archive).
+        let name: String
+        /// For an archive this is the *uncompressed* size, an upper bound; the real size is announced when it's sent.
+        let estimatedSize: UInt64
+        let archive: Bool
     }
 
-    private func prepareAndSend(_ urls: [URL], to targets: [String]) {
+    enum PlanResult { case ready([Planned]), tooBig(UInt64), tooMany, nothing }
+
+    /// Decides what would be sent, without touching the disk beyond measuring sizes. Cheap enough to call at the screen edge.
+    func plan(_ urls: [URL]) -> PlanResult {
+        guard !urls.isEmpty else { return .nothing }
+        guard urls.count <= ClipboardFilesOffer.maxItems else { return .tooMany }
         var total: UInt64 = 0
-        for url in urls {
-            total += FileArchive.totalSize(of: url, cap: K.fileClipboardLimit)
-            if total > K.fileClipboardLimit { break }
-        }
-        guard total <= K.fileClipboardLimit else {
-            DispatchQueue.main.async { self.onSkipped?(urls, total) }
-            return
-        }
-        let staging = FileManager.default.temporaryDirectory.appendingPathComponent("maclinker-send-\(UUID().uuidString)")
-        var prepared: [(url: URL, name: String, size: UInt64, archive: Bool)] = []
+        var planned: [Planned] = []
         for url in urls {
             var isDir: ObjCBool = false
             guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else { continue }
-            if isDir.boolValue {
-                do {
-                    try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
-                    let archive = staging.appendingPathComponent(url.lastPathComponent + ".zip")
-                    try FileArchive.zip(url, to: archive)
-                    let size = ((try? FileManager.default.attributesOfItem(atPath: archive.path)[.size]) as? NSNumber)?.uint64Value ?? 0
-                    prepared.append((archive, archive.lastPathComponent, size, true))
-                } catch {
-                    Log.error("couldn't pack \(url.lastPathComponent): \(error.localizedDescription)")
-                }
-            } else {
-                let size = ((try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? NSNumber)?.uint64Value ?? 0
-                prepared.append((url, url.lastPathComponent, size, false))
-            }
+            let size = FileArchive.totalSize(of: url, cap: K.fileClipboardLimit)
+            total += size
+            if total > K.fileClipboardLimit { return .tooBig(total) }
+            planned.append(Planned(source: url, id: UUID(), name: isDir.boolValue ? url.lastPathComponent + ".zip" : url.lastPathComponent,
+                                   estimatedSize: size, archive: isDir.boolValue))
         }
-        guard !prepared.isEmpty else { return }
+        return planned.isEmpty ? .nothing : .ready(planned)
+    }
 
-        let group = DispatchGroup()
-        for peer in targets {
-            // Separate ids per peer, so each transfer is tracked on its own.
-            let items = prepared.map { ClipboardFilesOffer.Item(id: UUID(), name: $0.name, size: $0.size, archive: $0.archive) }
-            guard let payload = try? JSONEncoder().encode(ClipboardFilesOffer(batch: UUID(), items: items)) else { continue }
-            send?(peer, .clipboardFiles, payload)
-            for (file, item) in zip(prepared, items) {
-                group.enter()
-                files.sendFile(file.url, to: peer, id: item.id, name: item.name) { _ in group.leave() }
+    static func offer(for planned: [Planned]) -> ClipboardFilesOffer {
+        ClipboardFilesOffer(batch: UUID(), items: planned.map {
+            ClipboardFilesOffer.Item(id: $0.id, name: $0.name, size: $0.estimatedSize, archive: $0.archive)
+        })
+    }
+
+    /// Copy: announce the batch, then stream it, to every peer that can take it.
+    func send(_ urls: [URL], to peers: [String]) {
+        let targets = peers.filter(peerSupports)
+        guard isEnabled(), !targets.isEmpty, !urls.isEmpty else { return }
+        work.async {
+            for peer in targets {
+                switch self.plan(urls) {      // fresh ids per peer, so each transfer is tracked on its own
+                case .ready(let planned):
+                    guard let payload = try? JSONEncoder().encode(Self.offer(for: planned)) else { continue }
+                    self.send?(peer, .clipboardFiles, payload)
+                    self.transmit(planned, to: peer)
+                case .tooBig(let total): DispatchQueue.main.async { self.onSkipped?(urls, total) }; return
+                case .tooMany: DispatchQueue.main.async { self.onSkipped?(urls, 0) }; return
+                case .nothing: return
+                }
             }
         }
-        group.notify(queue: work) { try? FileManager.default.removeItem(at: staging) }
+    }
+
+    /// Packs folders into zips and streams every item. The announcing message must already have been sent.
+    func transmit(_ planned: [Planned], to peer: String) {
+        work.async {
+            let staging = FileManager.default.temporaryDirectory.appendingPathComponent("maclinker-send-\(UUID().uuidString)")
+            let group = DispatchGroup()
+            for item in planned {
+                var url = item.source
+                if item.archive {
+                    do {
+                        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+                        url = staging.appendingPathComponent(item.name)
+                        try FileArchive.zip(item.source, to: url)
+                    } catch {
+                        Log.error("couldn't pack \(item.source.lastPathComponent): \(error.localizedDescription)")
+                        self.send?(peer, .fileAbort, Data(uuidBytes(item.id)))
+                        continue
+                    }
+                }
+                group.enter()
+                self.files.sendFile(url, to: peer, id: item.id, name: item.name) { _ in group.leave() }
+            }
+            group.notify(queue: self.work) { try? FileManager.default.removeItem(at: staging) }
+        }
     }
 
     // MARK: Receiving
 
     func handleOffer(_ payload: Data, from peer: String) {
-        guard isEnabled(), let offer = try? JSONDecoder().decode(ClipboardFilesOffer.self, from: payload),
-              Self.isAcceptable(offer) else { return }
+        guard isEnabled(), let offer = try? JSONDecoder().decode(ClipboardFilesOffer.self, from: payload) else { return }
+        register(offer, from: peer, purpose: .clipboard)
+    }
+
+    /// Reserves cache locations for a batch we've been told to expect. Used for both copied files and drags.
+    func register(_ offer: ClipboardFilesOffer, from peer: String, purpose: Purpose) {
+        guard Self.isAcceptable(offer) else { return }
         pruneCache(keeping: 4, olderThan: 24 * 3600)
         let dir = cacheRoot.appendingPathComponent(offer.batch.uuidString, isDirectory: true)
         var taken = Set<String>()
@@ -194,7 +232,12 @@ final class FileClipboardManager {
             pending.insert(item.id)
         }
         batches[offer.batch] = Batch(peer: peer, offer: offer, dir: dir, pending: pending,
-                                     baselineChangeCount: pasteboard.changeCount)
+                                     baselineChangeCount: pasteboard.changeCount, purpose: purpose)
+        if purpose == .drag {      // forget any stale answer for these ids, so a drop waits for the real data
+            results.lock()
+            for item in offer.items { itemResults[item.id] = nil }
+            results.unlock()
+        }
     }
 
     static func isAcceptable(_ offer: ClipboardFilesOffer) -> Bool {
@@ -233,6 +276,7 @@ final class FileClipboardManager {
         batches[batchID] = nil
         if batch.failed {
             try? FileManager.default.removeItem(at: batch.dir)
+            if batch.purpose == .drag { publish(batch.offer.items.map(\.id), results: [:]) }   // wake anyone waiting
             return
         }
         work.async { self.finalize(batch) }
@@ -240,6 +284,7 @@ final class FileClipboardManager {
 
     private func finalize(_ batch: Batch) {
         var results: [URL] = []
+        var perItem: [UUID: URL] = [:]
         for item in batch.offer.items {
             guard let url = batch.finished[item.id] else { return }
             if item.archive {
@@ -247,14 +292,21 @@ final class FileClipboardManager {
                     let extracted = try FileArchive.unzip(url, into: batch.dir.appendingPathComponent("x-\(item.id.uuidString)"))
                     try? FileManager.default.removeItem(at: url)
                     results.append(contentsOf: extracted)
+                    if let first = extracted.first { perItem[item.id] = first }
                 } catch {
                     Log.error("couldn't unpack copied folder: \(error.localizedDescription)")
                     try? FileManager.default.removeItem(at: batch.dir)
+                    if batch.purpose == .drag { publish(batch.offer.items.map(\.id), results: [:]) }
                     return
                 }
             } else {
                 results.append(url)
+                perItem[item.id] = url
             }
+        }
+        if batch.purpose == .drag {
+            publish(batch.offer.items.map(\.id), results: perItem)
+            return
         }
         DispatchQueue.main.async {
             // If you copied something else while this was arriving, don't overwrite it; the files stay in history.
@@ -265,6 +317,25 @@ final class FileClipboardManager {
                 self.wrotePasteboard()
             }
             self.onReceived?(results, self.peerName(batch.peer), untouched)
+        }
+    }
+
+    // MARK: Waiting for a dropped item
+
+    private func publish(_ ids: [UUID], results map: [UUID: URL]) {
+        results.lock()
+        for id in ids { itemResults[id] = .some(map[id]) }    // .some(nil) means "failed"
+        results.broadcast()
+        results.unlock()
+    }
+
+    /// Blocks (call it off the main thread) until a dragged item has arrived and is unpacked. Nil if it failed or timed out.
+    func awaitItem(_ id: UUID, timeout: TimeInterval) -> URL? {
+        let deadline = Date().addingTimeInterval(timeout)
+        results.lock(); defer { results.unlock() }
+        while true {
+            if let entry = itemResults[id] { return entry }          // arrived (URL) or failed (nil)
+            if !results.wait(until: deadline) { return nil }
         }
     }
 
@@ -292,3 +363,6 @@ final class FileClipboardManager {
         }
     }
 }
+
+/// Raw 16 bytes of a UUID, the way file messages carry ids.
+func uuidBytes(_ id: UUID) -> [UInt8] { withUnsafeBytes(of: id.uuid) { Array($0) } }

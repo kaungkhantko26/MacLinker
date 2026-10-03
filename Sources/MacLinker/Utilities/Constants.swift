@@ -9,6 +9,8 @@ enum K {
     static let hubMinVersion = "1.5.0"
     /// First version that understands copied-files messages.
     static let fileClipboardMinVersion = "1.6.0"
+    /// First version that can take part in drag-across-the-edge.
+    static let dragMinVersion = "1.7.0"
     /// Copied files are sent automatically only up to this total size; anything bigger needs Send File.
     static let fileClipboardLimit: UInt64 = 250 * 1024 * 1024
     static let bundleID = "com.maclinker.app"

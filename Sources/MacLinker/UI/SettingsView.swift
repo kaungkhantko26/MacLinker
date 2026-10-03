@@ -9,6 +9,7 @@ struct SettingsView: View {
                 Toggle("Control keyboard & mouse across Macs", isOn: $app.settings.inputSharing)
                 Toggle("Share clipboard (text, links, images)", isOn: $app.settings.clipboardSharing)
                 Toggle("Copy files, folders and apps between Macs (⌘C here, ⌘V there; up to 250 MB)", isOn: $app.settings.fileClipboard)
+                Toggle("Drag files, links and apps across the screen edge (experimental)", isOn: $app.settings.dragAcrossEdge)
                 Toggle("Accept files into Downloads/MacLinker", isOn: $app.settings.fileSharing)
                 Toggle("Let paired Macs adjust this Mac's brightness and volume", isOn: $app.settings.remoteSystemControl)
                 Toggle("Let paired Macs lock this Mac's screen", isOn: $app.settings.allowRemoteLock)

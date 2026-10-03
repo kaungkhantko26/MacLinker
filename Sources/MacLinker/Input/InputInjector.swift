@@ -48,6 +48,14 @@ final class InputInjector {
         post(e)
     }
 
+    func isButtonDown(_ n: Int) -> Bool { downButtons.contains(n) }
+
+    /// Presses and releases Escape, which cancels a drag in progress without dropping anything.
+    func cancelDrag() {
+        key(53, down: true, flags: [], autorepeat: false)
+        key(53, down: false, flags: [], autorepeat: false)
+    }
+
     func scroll(dx: Int32, dy: Int32, continuous: Bool) {
         post(CGEvent(scrollWheelEvent2Source: source, units: continuous ? .pixel : .line,
                      wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0))
