@@ -47,8 +47,6 @@ enum CursorHider {
 
     private static var hiddenOn: CGDirectDisplayID = 0
     private static var watchdog: Timer?
-    /// Extra CGDisplayHideCursor calls made by the watchdog; each must be undone in show().
-    private static var extraHides = 0
 
     static func hide() {
         guard !hidden else { return }
@@ -65,14 +63,16 @@ enum CursorHider {
         startWatchdog()
     }
 
-    /// macOS brings the pointer back on its own (app switch, Space change, a click on a window), which would leave
-    /// two pointers on screen while another Mac is being driven. Hide it again whenever that happens.
+    /// macOS honours "hide cursor" for the frontmost app, and gives the pointer back when another app takes focus
+    /// (app switch, Space change, a click on a window). That would leave two pointers on screen while another Mac is
+    /// being driven, so take focus back whenever that happens. A MacLinker window that is open is never touched.
     private static func startWatchdog() {
         watchdog?.invalidate()
         watchdog = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { _ in
-            guard hidden, extraHides < 20, CGCursorIsVisible() != 0 else { return }
-            CGDisplayHideCursor(hiddenOn)
-            extraHides += 1
+            guard hidden, !NSApp.isActive else { return }
+            if !NSApp.windows.contains(where: { $0.isVisible && $0.canBecomeMain }) {
+                NSApp.activate(ignoringOtherApps: true)
+            }
         }
     }
 
@@ -81,8 +81,7 @@ enum CursorHider {
         hidden = false
         watchdog?.invalidate()
         watchdog = nil
-        for _ in 0...extraHides { CGDisplayShowCursor(hiddenOn) }
-        extraHides = 0
+        CGDisplayShowCursor(hiddenOn)
         NSCursor.unhide()
         previousApp?.activate()
         previousApp = nil
