@@ -241,6 +241,21 @@ final class StorageAndModelTests: XCTestCase {
 }
 
 final class SystemControlTests: XCTestCase {
+    func testScrollPhasesAndGesturesRoundTripAndStayCompatible() throws {
+        // Without phases the wire format is the original 9 bytes, so older peers and the interop vectors are unaffected.
+        XCTAssertEqual(ScrollPayload(dx: -3, dy: 12, continuous: true).encode().count, 9)
+        let old = try ScrollPayload.decode(ScrollPayload(dx: 1, dy: 2, continuous: true).encode())
+        XCTAssertEqual(old.phase, 0)
+        let s = ScrollPayload(dx: -3, dy: 12, continuous: true, phase: 2, momentum: 2)
+        XCTAssertEqual(try ScrollPayload.decode(s.encode()).momentum, 2)
+        XCTAssertEqual(try ScrollPayload.decode(s.encode()).phase, 2)
+        // A 9-byte reader (older peer) still reads the leading fields of the extended payload.
+        XCTAssertEqual(try ScrollPayload.decode(s.encode().prefix(9)).dy, 12)
+        let g = GesturePayload(kind: .magnify, phase: 2, value: 0.25, value2: 0)
+        XCTAssertEqual(try GesturePayload.decode(g.encode()), g)
+        XCTAssertThrowsError(try GesturePayload.decode(g.encode().prefix(4)))
+    }
+
     func testControlPayloadClampsAndRejectsGarbage() throws {
         let hi = try SystemControlPayload.decode(SystemControlPayload(kind: .volume, value: 7).encode())
         XCTAssertEqual(hi.value, 1)

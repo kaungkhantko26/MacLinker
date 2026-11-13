@@ -46,6 +46,9 @@ enum CursorHider {
     }
 
     private static var hiddenOn: CGDirectDisplayID = 0
+    private static var watchdog: Timer?
+    /// Extra CGDisplayHideCursor calls made by the watchdog; each must be undone in show().
+    private static var extraHides = 0
 
     static func hide() {
         guard !hidden else { return }
@@ -59,12 +62,27 @@ enum CursorHider {
         hiddenOn = pointerDisplay
         CGDisplayHideCursor(hiddenOn)
         NSCursor.hide()
+        startWatchdog()
+    }
+
+    /// macOS brings the pointer back on its own (app switch, Space change, a click on a window), which would leave
+    /// two pointers on screen while another Mac is being driven. Hide it again whenever that happens.
+    private static func startWatchdog() {
+        watchdog?.invalidate()
+        watchdog = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { _ in
+            guard hidden, extraHides < 20, CGCursorIsVisible() != 0 else { return }
+            CGDisplayHideCursor(hiddenOn)
+            extraHides += 1
+        }
     }
 
     static func show() {
         guard hidden else { return }
         hidden = false
-        CGDisplayShowCursor(hiddenOn)
+        watchdog?.invalidate()
+        watchdog = nil
+        for _ in 0...extraHides { CGDisplayShowCursor(hiddenOn) }
+        extraHides = 0
         NSCursor.unhide()
         previousApp?.activate()
         previousApp = nil

@@ -66,11 +66,12 @@ final class InputManager: ObservableObject {
 
     /// Cursor visibility must be changed from the main thread, and only after the connection has been
     /// allowed to set it from the background. Calls are issued in order, and balanced (hide/show counts stack).
-    private func setCursorHidden(_ hidden: Bool) {
-        guard hidden != cursorHidden else { return }
+    private func setCursorHidden(_ hidden: Bool, then completion: (() -> Void)? = nil) {
+        guard hidden != cursorHidden else { completion?(); return }
         cursorHidden = hidden
         DispatchQueue.main.async {
             if hidden { CursorHider.hide() } else { CursorHider.show() }
+            if let completion { self.thread.perform(completion) }
         }
     }
 
@@ -117,12 +118,16 @@ final class InputManager: ObservableObject {
         setState(.controlling(peer: peer, edge: edge))
         monitor.setActive(true)
         CGAssociateMouseAndMouseCursorPosition(0)
-        setCursorHidden(true)
-        send?(peer, .enterControl, ControlPayload(edge: edge, position: position).encode())
+        // The peer's pointer appears on enterControl, so hide ours first. Announcing before ours is gone is what
+        // showed two pointers (one on each screen) for a moment, or for good when hiding was slow.
+        setCursorHidden(true) { [weak self] in
+            guard let self, case .controlling(let current, _) = self.controlState, current == peer else { return }
+            self.send?(peer, .enterControl, ControlPayload(edge: edge, position: position).encode())
+            self.startFlushing(to: peer)
+        }
         // The drag continues on the other Mac; cancel the one here, or it would sit frozen waiting for a mouse-up
         // that this Mac will never see.
         if abandoningLocalDrag { injector.cancelDrag() }
-        startFlushing(to: peer)
     }
 
     /// Mice report up to 1000 Hz. Sending each report separately floods the link and the
@@ -191,8 +196,10 @@ final class InputManager: ObservableObject {
                                 : event.getIntegerValueField(.scrollWheelEventDeltaAxis1)
             let dx = continuous ? event.getIntegerValueField(.scrollWheelEventPointDeltaAxis2)
                                 : event.getIntegerValueField(.scrollWheelEventDeltaAxis2)
-            send?(peer, .scroll, ScrollPayload(dx: Int32(clamping: dx), dy: Int32(clamping: dy),
-                                               continuous: continuous).encode())
+            send?(peer, .scroll, ScrollPayload(
+                dx: Int32(clamping: dx), dy: Int32(clamping: dy), continuous: continuous,
+                phase: UInt8(clamping: event.getIntegerValueField(.scrollWheelEventScrollPhase)),
+                momentum: UInt8(clamping: event.getIntegerValueField(.scrollWheelEventMomentumPhase))).encode())
         case .keyDown, .keyUp:
             let p = KeyPayload(keyCode: UInt16(clamping: event.getIntegerValueField(.keyboardEventKeycode)),
                                down: type == .keyDown, flags: event.flags.rawValue,
@@ -203,9 +210,34 @@ final class InputManager: ObservableObject {
                                down: true, flags: event.flags.rawValue, autorepeat: false)
             send?(peer, .flagsChanged, p.encode())
         default:
-            return false
+            // Trackpad / Magic Mouse gestures. All of them are swallowed locally; the ones we can replay are sent.
+            guard InputMonitor.gestureTypes.contains(type.rawValue) else { return false }
+            if let g = Self.gesture(from: event) { send?(peer, .gesture, g.encode()) }
         }
         return true
+    }
+
+    private static func wirePhase(_ phase: NSEvent.Phase) -> UInt8 {
+        if phase.contains(.began) { return 1 }
+        if phase.contains(.changed) { return 2 }
+        if phase.contains(.ended) { return 4 }
+        if phase.contains(.cancelled) { return 8 }
+        if phase.contains(.mayBegin) { return 128 }
+        return 0
+    }
+
+    private static func gesture(from event: CGEvent) -> GesturePayload? {
+        guard let ns = NSEvent(cgEvent: event) else { return nil }
+        switch ns.type {
+        case .magnify:
+            return GesturePayload(kind: .magnify, phase: wirePhase(ns.phase), value: Float(ns.magnification), value2: 0)
+        case .rotate:
+            return GesturePayload(kind: .rotate, phase: wirePhase(ns.phase), value: ns.rotation, value2: 0)
+        case .swipe:
+            return GesturePayload(kind: .swipe, phase: 0, value: Float(ns.deltaX), value2: Float(ns.deltaY))
+        default:
+            return nil
+        }
     }
 
     // MARK: Remote messages
@@ -273,7 +305,10 @@ final class InputManager: ObservableObject {
             case .scroll:
                 guard isControlled(by: peer) else { return }
                 let p = try ScrollPayload.decode(message.payload)
-                injector.scroll(dx: p.dx, dy: p.dy, continuous: p.continuous)
+                injector.scroll(dx: p.dx, dy: p.dy, continuous: p.continuous, phase: p.phase, momentum: p.momentum)
+            case .gesture:
+                guard isControlled(by: peer) else { return }
+                injector.gesture(try GesturePayload.decode(message.payload), at: virtualCursor)
             case .keyEvent:
                 guard isControlled(by: peer) else { return }
                 let p = try KeyPayload.decode(message.payload)

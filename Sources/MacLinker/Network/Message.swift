@@ -11,6 +11,8 @@ enum MessageType: UInt8 {
     case scroll = 12
     case keyEvent = 13
     case flagsChanged = 14
+    /// Trackpad / Magic Mouse gestures (pinch, rotate, swipe). Older peers ignore unknown types.
+    case gesture = 15
 
     case enterControl = 20
     case releaseControl = 21
@@ -129,11 +131,44 @@ struct ScrollPayload: BinaryPayload {
     var dy: Int32
     /// Continuous (trackpad/pixel) vs. line-based (notched wheel) deltas.
     var continuous: Bool
+    /// Trackpad scroll phase (CGScrollPhase: 1 began, 2 changed, 4 ended, 8 cancelled, 128 may-begin) and momentum
+    /// phase (1 begin, 2 continue, 3 end). Without them apps can't tell a finger scroll from a wheel, so inertia,
+    /// rubber-banding and two-finger back/forward swipes stop working. Appended after the original 9 bytes, and
+    /// omitted when both are 0, so older peers (and the committed interop vectors) are unaffected.
+    var phase: UInt8 = 0
+    var momentum: UInt8 = 0
 
-    func encode() -> Data { var w = ByteWriter(); w.i32(dx); w.i32(dy); w.bool(continuous); return w.data }
+    func encode() -> Data {
+        var w = ByteWriter(); w.i32(dx); w.i32(dy); w.bool(continuous)
+        if phase != 0 || momentum != 0 { w.u8(phase); w.u8(momentum) }
+        return w.data
+    }
     static func decode(_ data: Data) throws -> Self {
         var r = ByteReader(data)
-        return Self(dx: try r.i32(), dy: try r.i32(), continuous: try r.bool())
+        var p = Self(dx: try r.i32(), dy: try r.i32(), continuous: try r.bool())
+        if r.remaining >= 2 { p.phase = try r.u8(); p.momentum = try r.u8() }
+        return p
+    }
+}
+
+/// One step of a multi-touch gesture. `phase` uses the same values as `ScrollPayload.phase`.
+struct GesturePayload: BinaryPayload, Equatable {
+    enum Kind: UInt8 { case magnify = 1, rotate = 2, swipe = 3, smartMagnify = 4 }
+    var kind: Kind
+    var phase: UInt8
+    /// Magnify: change in scale. Rotate: degrees. Swipe: horizontal direction (1 left, -1 right).
+    var value: Float
+    /// Swipe: vertical direction (1 up, -1 down).
+    var value2: Float
+
+    func encode() -> Data {
+        var w = ByteWriter(); w.u8(kind.rawValue); w.u8(phase); w.f32(value); w.f32(value2)
+        return w.data
+    }
+    static func decode(_ data: Data) throws -> Self {
+        var r = ByteReader(data)
+        guard let kind = Kind(rawValue: try r.u8()) else { throw ByteError.truncated }
+        return Self(kind: kind, phase: try r.u8(), value: try r.f32(), value2: try r.f32())
     }
 }
 

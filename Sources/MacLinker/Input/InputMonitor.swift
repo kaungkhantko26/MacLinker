@@ -35,10 +35,15 @@ final class InputMonitor {
         .scrollWheel, .keyDown, .keyUp, .flagsChanged,
     ]
 
+    /// Multi-touch gesture events (rotate, begin/end gesture, gesture, magnify, swipe, smart magnify). CoreGraphics has
+    /// no named constants for them, so they are matched by raw value.
+    static let gestureTypes: Set<UInt32> = [18, 19, 20, 29, 30, 31, 32]
+
     @discardableResult
     func start() -> Bool {
         guard !isRunning else { return true }
-        let mask = Self.types.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
+        var mask = Self.types.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
+        for raw in Self.gestureTypes { mask |= CGEventMask(1) << raw }
         func make(active: Bool) -> CFMachPort? {
             let ctx = Context(self, active: active)
             contexts.append(ctx)
